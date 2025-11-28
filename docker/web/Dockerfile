@@ -4,7 +4,9 @@ COPY ./requirements.txt /usr/src/app/
 WORKDIR /usr/src/app/
 ENV PYTHONUNBUFFERED=1
 
-RUN apt-get update && apt-get insall -y --no-install-recommends netcat-traditional && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+RUN apt-get update && apt-get install -y --no-install-recommends netcat-traditional \
+     && rm -rf /var/lib/apt/lists/* /var/cache/apt/archives/*
+
 
 RUN pip install --upgrade pip setuptools wheel
 RUN pip install --no-cache-dir -r requirements.txt
