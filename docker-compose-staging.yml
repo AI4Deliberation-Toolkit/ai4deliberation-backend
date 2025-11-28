@@ -6,13 +6,13 @@ services:
       context: .
       dockerfile: ./docker/web/Dockerfile
     restart: always
-    command: gunicorn -w 4 -b 0.0.0.0:8000 ai4deliberation-backend.wsgi:application --timeout 300
+    command: gunicorn -w 4 -b 0.0.0.0:8000 ai4deliberation_backend.wsgi:application --timeout 300
     volumes:
       - static_volume:/usr/src/app/static/
       - media_volume:/usr/src/app/media/
       - .env:/usr/src/app/.env
     environment:
-      DJANGO_SETTINGS_MODULE: ai4deliberation-backend.settings.staging
+      DJANGO_SETTINGS_MODULE: ai4deliberation_backend.settings.staging
     depends_on:
       - db
 
