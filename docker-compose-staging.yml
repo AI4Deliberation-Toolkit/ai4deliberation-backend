@@ -1,0 +1,45 @@
+services:
+  web:
+    container_name: ai4deliberation-back
+    image: git.konnektable.com:5050/rnd/rnds2025/ai4deliberation-backend:latest
+    build:
+      context: .
+      dockerfile: ./docker/web/Dockerfile
+    restart: always
+    command: gunicorn -w 4 -b 0.0.0.0:8000 ai4deliberation-backend.wsgi:application --timeout 300
+    volumes:
+      - static_volume:/usr/src/app/static/
+      - media_volume:/usr/src/app/media/
+      - .env:/usr/src/app/.env
+    environment:
+      DJANGO_SETTINGS_MODULE: ai4deliberation-backend.settings.staging
+    depends_on:
+      - db
+
+  db:
+    container_name: ai4deliberation-back-db
+    image: postgres:17.6
+    env_file:
+      - .env
+    volumes:
+      - db_volume:/var/lib/postgresql/data/
+    command: postgres -c max_connections=1000
+
+  nginx:
+    container_name: ai4deliberation-back-nginx
+    image: git.konnektable.com:5050/rnd/rnds2025/ai4deliberation-backend:nginx
+    build:
+      context: .
+      dockerfile: ./docker/nginx/Dockerfile
+    ports:
+      - 2026:80
+    volumes:
+      - static_volume:/home/app/web/static/
+      - media_volume:/home/app/web/media/
+    depends_on:
+      - web
+
+volumes:
+  static_volume:
+  media_volume:
+  db_volume:

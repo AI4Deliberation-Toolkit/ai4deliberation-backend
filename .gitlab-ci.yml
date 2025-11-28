@@ -1,0 +1,33 @@
+stages:
+  - release
+  - deploy
+
+release:
+  stage: release
+  image: docker:latest
+  services:
+    - docker:dind
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - docker build -t ${CI_REGISTRY}/${CI_PROJECT_PATH}:latest -f docker/web/Dockerfile .
+    - docker build -t ${CI_REGISTRY}/${CI_PROJECT_PATH}:nginx -f docker/nginx/Dockerfile .
+    - docker push "${CI_REGISTRY}/${CI_PROJECT_PATH}":latest
+    - docker push "${CI_REGISTRY}/${CI_PROJECT_PATH}":nginx
+  after_script:
+    - docker logout ${CI_REGISTRY}/{CI_PROJECT_PATH}
+
+deploy:
+  stage: deploy
+  tags:
+    - deploy-rnd-staging
+  environment: staging
+  before_script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+  script:
+    - cat $ENV_STAGING >> .env
+    - docker compose -f docker-compose-staging.yml stop
+    - docker compose -f docker-compose-staging.yml pull
+    - docker compose -f docker-compose-staging.yml up -d
+  after_script:
+    - docker logout ${CI_REGISTRY}/${CI_PROJECT_PATH}

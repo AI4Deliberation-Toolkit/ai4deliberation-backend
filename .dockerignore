@@ -1,0 +1,50 @@
+# Python cache files
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.env
+
+# Git and CI
+.git/
+.github/
+.gitlab/
+.gitlab-ci.yml
+
+# Docker
+docker-compose*.yml
+Dockerfile
+.dockerignore
+
+# Media and static files (if mounted as volumes)
+media/
+static/
+
+# Development files
+*.log
+*.sqlite3
+*.db
+local_settings.py
+*.bak
+*.swp
+
+# Documentation
+docs/
+README.md
+LICENSE
+*.rst
+
+# Miscellaneous
+.DS_Store
+.idea/
+.vscode/
+node_modules/
