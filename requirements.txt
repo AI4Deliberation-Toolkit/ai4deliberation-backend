@@ -7,3 +7,10 @@ python-decouple==3.8
 # deployment
 gunicorn==23.0.0
 psycopg2-binary==2.9.11
+
+# extra
+transformers==4.50.2
+sentence-transformers==2.2.2 # Needed for MarianMT, sentiment analysis etc
+sentencepiece==0.2.0 # same as above
+scikit-learn==1.6.1 # Needed for categorization, clustering
+tensorflow-cpu==2.18.0
