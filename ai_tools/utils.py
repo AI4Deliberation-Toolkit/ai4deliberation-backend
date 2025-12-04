@@ -6,9 +6,9 @@ from sklearn.feature_extraction.text import CountVectorizer
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
 
-def categorization():
+def categorization(texts):
     # Source to be determined
-    texts = []
+    #texts = []
     model_name = "cardiffnlp/tweet-topic-large-multilingual"
     model = AutoModelForSequenceClassification.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
@@ -29,6 +29,7 @@ def categorization():
         for idx, pred in enumerate(predictions):
             if pred:
                 print(f"Predicted topic: {topic_labels[idx]}")
+        return predictions
 
 
 def categorization_cluster():
