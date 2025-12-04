@@ -9,6 +9,7 @@ from transformers import AutoTokenizer, AutoModelForSequenceClassification
 def categorization(texts):
     # Source to be determined
     #texts = []
+
     model_name = "cardiffnlp/tweet-topic-large-multilingual"
     model = AutoModelForSequenceClassification.from_pretrained(model_name)
     tokenizer = AutoTokenizer.from_pretrained(model_name)
