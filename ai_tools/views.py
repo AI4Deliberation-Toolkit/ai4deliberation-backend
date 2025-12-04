@@ -3,7 +3,7 @@ from django.shortcuts import render
 from rest_framework import views, status
 from rest_framework.response import Response
 
-from ai_tools import categorization
+from ai_tools.utils import categorization
 
 
 class CategorizeTextView(views.APIView):
