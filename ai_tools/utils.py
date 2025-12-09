@@ -26,11 +26,13 @@ def categorization(texts):
         predictions = (scores >= threshold).astype(int)
 
         # Map to topics
+        predictions_list = []
         topic_labels = model.config.id2label
         for idx, pred in enumerate(predictions):
             if pred:
                 print(f"Predicted topic: {topic_labels[idx]}")
-        return predictions
+                predictions_list.append(topic_labels[idx])
+        return predictions_list
 
 
 def categorization_cluster():
