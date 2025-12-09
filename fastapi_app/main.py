@@ -16,4 +16,9 @@ class CategorizationOut(BaseModel):
 @app.post("/categorize", response_model=CategorizationOut)
 def categorize_text(payload: TextIn):
     predictions = categorization([payload.text])
-    return {"topics": predictions}
+    # Convert numpy types to Python types:
+    cleaned = [
+        int(p) if hasattr(p, "item") else p
+        for p in predictions
+    ]
+    return {"topics": cleaned}
