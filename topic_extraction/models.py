@@ -32,5 +32,8 @@ class ArticleTopic(models.Model):
     backend = models.CharField(max_length=20, choices=BACKEND_CHOICES)
     computed_at = models.DateTimeField(auto_now_add=True)
 
+    def __str__(self):
+        return f'{self.platform}/{self.article_id}'
+
     class Meta:
         ordering = ['-computed_at']

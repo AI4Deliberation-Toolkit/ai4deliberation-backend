@@ -43,13 +43,20 @@ class ArticleTopicModelTest(TestCase):
         self.assertIsNotNone(record.computed_at)
 
     def test_article_topic_ordering_newest_first(self):
-        ArticleTopic.objects.create(
-            article_id='art-1', platform='p', language='el',
-            raw_topics=[], normalized=[], backend='embedding',
-        )
-        ArticleTopic.objects.create(
-            article_id='art-1', platform='p', language='el',
-            raw_topics=[], normalized=[], backend='llm',
-        )
+        from datetime import datetime, timezone, timedelta
+        from unittest.mock import patch
+
+        t1 = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        t2 = t1 + timedelta(seconds=1)
+
+        with patch('django.utils.timezone.now', side_effect=[t1, t2]):
+            ArticleTopic.objects.create(
+                article_id='art-1', platform='p', language='el',
+                raw_topics=[], normalized=[], backend='embedding',
+            )
+            ArticleTopic.objects.create(
+                article_id='art-1', platform='p', language='el',
+                raw_topics=[], normalized=[], backend='llm',
+            )
         records = list(ArticleTopic.objects.filter(article_id='art-1'))
-        self.assertEqual(records[0].backend, 'llm')
+        self.assertGreaterEqual(records[0].computed_at, records[1].computed_at)
