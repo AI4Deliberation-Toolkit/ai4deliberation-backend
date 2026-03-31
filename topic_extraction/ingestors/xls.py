@@ -28,8 +28,17 @@ class XLSIngestor(BaseIngestor):
 
     def load(self, source: str) -> list[Conversation]:
         rows, headers = self._read_rows(source)
-        article_col = headers.index(self.column_map['article'])
-        comment_col = headers.index(self.column_map['comment'])
+        try:
+            article_col = headers.index(self.column_map['article'])
+            comment_col = headers.index(self.column_map['comment'])
+        except ValueError:
+            missing = [
+                col for col in (self.column_map['article'], self.column_map['comment'])
+                if col not in headers
+            ]
+            raise ValueError(
+                f'Required columns not found: {missing}. Available headers: {headers}'
+            )
 
         grouped: dict[str, list[str]] = {}
         for row in rows:
