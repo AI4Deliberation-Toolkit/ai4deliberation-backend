@@ -41,7 +41,8 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'ai_tools'
+    'ai_tools',
+    'topic_extraction',
 ]
 
 MIDDLEWARE = [
@@ -130,3 +131,10 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
 HUGGING_TOKEN = config('HUGGING_TOKEN')
+
+# Topic extraction settings
+EXTRACTION_BACKEND = config('EXTRACTION_BACKEND', default='embedding')
+EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='intfloat/multilingual-e5-base')
+ZERO_SHOT_MODEL_NAME = config('ZERO_SHOT_MODEL_NAME', default='MoritzLaurer/mDeBERTa-v3-base-mnli-xnli')
+LLM_MODEL_NAME = config('LLM_MODEL_NAME', default='Qwen/Qwen2.5-3B-Instruct')
+EMBEDDING_THRESHOLD = float(config('EMBEDDING_THRESHOLD', default='0.35'))

@@ -10,7 +10,10 @@ psycopg2-binary==2.9.11
 
 # extra
 transformers==4.50.2
-sentence-transformers==2.2.2 # Needed for MarianMT, sentiment analysis etc
-sentencepiece==0.2.0 # same as above
-scikit-learn==1.6.1 # Needed for categorization, clustering
+sentence-transformers>=2.3.0
+sentencepiece==0.2.0
+scikit-learn==1.6.1
 tensorflow-cpu==2.18.0
+accelerate>=0.27.0
+langdetect>=1.0.9
+openpyxl>=3.1.0

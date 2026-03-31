@@ -22,4 +22,5 @@ from django.conf.urls.static import static
 urlpatterns = [
     path('admin/', admin.site.urls),
     path('api/', include('ai_tools.urls')),
+    path('api/', include('topic_extraction.urls')),
 ]
