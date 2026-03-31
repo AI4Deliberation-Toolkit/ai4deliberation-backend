@@ -35,13 +35,14 @@ def run(article_id: str, platform: str, article: str, comments: list[str]) -> Ar
     language = detect_language(article, comments)
 
     extractor = _get_extractor()
+    backend = getattr(settings, 'EXTRACTION_BACKEND', 'embedding')
     try:
         raw_topics = extractor.extract(article, comments, language)
     except Exception:
         raw_topics = EmbeddingExtractor().extract(article, comments, language)
+        backend = 'embedding'
 
     normalized = normalize(raw_topics, language)
-    backend = getattr(settings, 'EXTRACTION_BACKEND', 'embedding')
 
     return ArticleTopic.objects.create(
         article_id=article_id,

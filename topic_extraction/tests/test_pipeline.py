@@ -50,6 +50,7 @@ class PipelineRunTest(TestCase):
 
         mock_emb.extract.assert_called_once()
         self.assertIsInstance(record, ArticleTopic)
+        self.assertEqual(record.backend, 'embedding')
 
     @patch('topic_extraction.pipeline.normalize')
     @patch('topic_extraction.pipeline._get_extractor')
