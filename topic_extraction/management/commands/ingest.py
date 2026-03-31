@@ -1,3 +1,4 @@
+import os
 from django.core.management.base import BaseCommand, CommandError
 from topic_extraction import pipeline
 
@@ -32,6 +33,9 @@ class Command(BaseCommand):
         module = importlib.import_module(module_path)
         ingestor_cls = getattr(module, class_name)
         ingestor = ingestor_cls(platform=platform)
+
+        if not os.path.exists(source):
+            raise CommandError(f'Source file not found: {source!r}')
 
         self.stdout.write(f'Loading conversations from {source!r}...')
         conversations = ingestor.load(source)
