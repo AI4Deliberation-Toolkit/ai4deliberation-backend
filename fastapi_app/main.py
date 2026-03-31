@@ -6,7 +6,7 @@ import django
 import numpy as np
 from bertopic import BERTopic
 from django.apps import apps as django_apps
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
@@ -500,12 +500,15 @@ def extract_single(payload: SingleArticleInput):
 @app.post("/topics/extract-conversation", response_model=ConversationTopicsOut)
 def extract_conversation(payload: ConversationIn):
     from topic_extraction import pipeline
-    record = pipeline.run(
-        article_id=payload.article_id,
-        platform=payload.platform,
-        article=payload.article,
-        comments=payload.comments,
-    )
+    try:
+        record = pipeline.run(
+            article_id=payload.article_id,
+            platform=payload.platform,
+            article=payload.article,
+            comments=payload.comments,
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f'Topic extraction failed: {e}')
     return {
         "id": str(record.id),
         "language": record.language,
@@ -520,7 +523,6 @@ def get_article_topics(article_id: str):
     from topic_extraction.models import ArticleTopic
     record = ArticleTopic.objects.filter(article_id=article_id).first()
     if record is None:
-        from fastapi import HTTPException
         raise HTTPException(status_code=404, detail="Not found.")
     return {
         "article_id": record.article_id,
