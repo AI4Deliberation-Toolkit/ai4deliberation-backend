@@ -16,12 +16,18 @@ class ExtractConversationView(views.APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
-        record = pipeline.run(
-            article_id=request.data['article_id'],
-            platform=request.data['platform'],
-            article=request.data['article'],
-            comments=request.data.get('comments', []),
-        )
+        try:
+            record = pipeline.run(
+                article_id=request.data['article_id'],
+                platform=request.data['platform'],
+                article=request.data['article'],
+                comments=request.data.get('comments', []),
+            )
+        except Exception as e:
+            return Response(
+                {'detail': 'Topic extraction failed.', 'error': str(e)},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
         return Response(
             {
                 'id': str(record.id),
