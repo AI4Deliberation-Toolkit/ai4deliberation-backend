@@ -1,13 +1,20 @@
 
+import os
 from collections import defaultdict
 
+import django
 import numpy as np
 from bertopic import BERTopic
+from django.apps import apps as django_apps
 from fastapi import FastAPI
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
 from umap import UMAP
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'ai4deliberation_backend.settings.settings')
+if not django_apps.ready:
+    django.setup()
 
 from ai_tools.utils import categorization
 
@@ -288,6 +295,19 @@ class TopicOut(BaseModel):
 class TopicsResponse(BaseModel):
     topics: list[TopicOut]
 
+class ConversationIn(BaseModel):
+    article_id: str
+    platform: str
+    article: str
+    comments: list[str] = []
+
+class ConversationTopicsOut(BaseModel):
+    id: str
+    language: str
+    raw_topics: list
+    normalized: list
+    backend: str
+
 
 # ==================
 # Embedding
@@ -474,4 +494,40 @@ def extract_single_zero_shot(payload: SingleArticleInput):
 def extract_single(payload: SingleArticleInput):
     return {
         "topics": extract_topics_single_article(payload.text)
+    }
+
+
+@app.post("/topics/extract-conversation", response_model=ConversationTopicsOut)
+def extract_conversation(payload: ConversationIn):
+    from topic_extraction import pipeline
+    record = pipeline.run(
+        article_id=payload.article_id,
+        platform=payload.platform,
+        article=payload.article,
+        comments=payload.comments,
+    )
+    return {
+        "id": str(record.id),
+        "language": record.language,
+        "raw_topics": record.raw_topics,
+        "normalized": record.normalized,
+        "backend": record.backend,
+    }
+
+
+@app.get("/topics/article/{article_id}")
+def get_article_topics(article_id: str):
+    from topic_extraction.models import ArticleTopic
+    record = ArticleTopic.objects.filter(article_id=article_id).first()
+    if record is None:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Not found.")
+    return {
+        "article_id": record.article_id,
+        "platform": record.platform,
+        "language": record.language,
+        "raw_topics": record.raw_topics,
+        "normalized": record.normalized,
+        "backend": record.backend,
+        "computed_at": record.computed_at.isoformat(),
     }
