@@ -6,6 +6,15 @@ _taxonomy_cache: dict = {}  # language_code -> (list[Topic], np.ndarray)
 
 
 def get_embedding_model():
+    """Get or create the embedding model using a singleton pattern.
+
+    Loads the model specified by settings.EMBEDDING_MODEL_NAME, defaulting to
+    'intfloat/multilingual-e5-base'. The model is cached in module scope and
+    reused across calls.
+
+    Returns:
+        SentenceTransformer: The embedding model instance.
+    """
     global _embedding_model
     if _embedding_model is None:
         from sentence_transformers import SentenceTransformer
@@ -26,7 +35,6 @@ def get_taxonomy_embeddings(language: str):
     Returns:
         Tuple of (list[Topic], np.ndarray of shape [n_topics, embedding_dim]).
     """
-    global _taxonomy_cache
     if language not in _taxonomy_cache:
         from topic_extraction.models import Topic
         topics = list(Topic.objects.all())
