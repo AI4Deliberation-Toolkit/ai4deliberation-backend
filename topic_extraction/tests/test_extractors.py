@@ -1,3 +1,4 @@
+import json
 import numpy as np
 from unittest.mock import patch, MagicMock
 from django.test import TestCase
@@ -5,6 +6,7 @@ from topic_extraction.extractors.base import BaseExtractor, TopicResult
 from topic_extraction.models import Topic
 from topic_extraction.taxonomy import invalidate_taxonomy_cache
 from topic_extraction.extractors.embedding import EmbeddingExtractor
+from topic_extraction.extractors.llm import LLMExtractor
 
 
 class TopicResultTest(TestCase):
@@ -94,3 +96,57 @@ class EmbeddingExtractorTest(TestCase):
         )
         # With embedding ~0.5 and zero-shot ~0.1, avg ~0.3 < threshold 0.35
         self.assertIsInstance(results, list)
+
+
+class LLMExtractorTest(TestCase):
+    def _make_pipeline_mock(self, json_output: str):
+        mock_pipeline = MagicMock()
+        prompt_placeholder = 'PROMPT'
+        mock_pipeline.return_value = [{'generated_text': prompt_placeholder + json_output}]
+        return mock_pipeline, prompt_placeholder
+
+    @patch('topic_extraction.extractors.llm.pipeline')
+    def test_parses_valid_json_response(self, mock_pipeline_fn):
+        json_body = '[{"label": "Εκπαιδευτική Πολιτική", "score": 0.9}]'
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [{'generated_text': 'PROMPT' + json_body}]
+        mock_pipeline_fn.return_value = mock_pipe
+
+        extractor = LLMExtractor()
+        extractor._pipeline = mock_pipe
+
+        with patch.object(extractor, '_build_prompt', return_value='PROMPT'):
+            results = extractor.extract('article text', ['comment'], language='el')
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].label, 'Εκπαιδευτική Πολιτική')
+        self.assertAlmostEqual(results[0].score, 0.9)
+
+    @patch('topic_extraction.extractors.llm.pipeline')
+    def test_raises_on_invalid_json(self, mock_pipeline_fn):
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [{'generated_text': 'PROMPTnot valid json at all'}]
+        mock_pipeline_fn.return_value = mock_pipe
+
+        extractor = LLMExtractor()
+        extractor._pipeline = mock_pipe
+
+        with patch.object(extractor, '_build_prompt', return_value='PROMPT'):
+            with self.assertRaises(ValueError):
+                extractor.extract('article', [], language='el')
+
+    @patch('topic_extraction.extractors.llm.pipeline')
+    def test_skips_items_missing_required_fields(self, mock_pipeline_fn):
+        json_body = '[{"label": "Good Topic", "score": 0.8}, {"label": "Missing Score"}]'
+        mock_pipe = MagicMock()
+        mock_pipe.return_value = [{'generated_text': 'PROMPT' + json_body}]
+        mock_pipeline_fn.return_value = mock_pipe
+
+        extractor = LLMExtractor()
+        extractor._pipeline = mock_pipe
+
+        with patch.object(extractor, '_build_prompt', return_value='PROMPT'):
+            results = extractor.extract('article', [], language='en')
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0].label, 'Good Topic')
