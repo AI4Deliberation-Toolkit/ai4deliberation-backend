@@ -1,7 +1,6 @@
 from django.conf import settings
 
 from topic_extraction.extractors.base import BaseExtractor
-from topic_extraction.extractors.embedding import EmbeddingExtractor
 from topic_extraction.language import detect_language
 from topic_extraction.models import ArticleTopic
 from topic_extraction.normalizer import normalize
@@ -39,6 +38,7 @@ def run(article_id: str, platform: str, article: str, comments: list[str]) -> Ar
     try:
         raw_topics = extractor.extract(article, comments, language)
     except Exception:
+        from topic_extraction.extractors.embedding import EmbeddingExtractor
         raw_topics = EmbeddingExtractor().extract(article, comments, language)
         backend = 'embedding'
 

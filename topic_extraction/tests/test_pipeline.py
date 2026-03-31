@@ -41,7 +41,7 @@ class PipelineRunTest(TestCase):
         mock_get_extractor.return_value = mock_llm
         mock_normalize.return_value = []
 
-        with patch('topic_extraction.pipeline.EmbeddingExtractor') as mock_emb_cls:
+        with patch('topic_extraction.extractors.embedding.EmbeddingExtractor') as mock_emb_cls:
             mock_emb = MagicMock()
             mock_emb.extract.return_value = [TopicResult(label='Education Policy', score=0.6)]
             mock_emb_cls.return_value = mock_emb

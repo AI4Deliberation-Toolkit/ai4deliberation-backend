@@ -54,7 +54,10 @@ class LLMExtractor(BaseExtractor):
         if not json_match:
             raise ValueError(f'LLM did not return valid JSON: {generated[:200]}')
 
-        raw = json.loads(json_match.group())
+        try:
+            raw = json.loads(json_match.group())
+        except json.JSONDecodeError as exc:
+            raise ValueError(f'LLM did not return valid JSON: {generated[:200]}') from exc
         return [
             TopicResult(label=item['label'], score=float(item['score']))
             for item in raw
