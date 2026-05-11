@@ -14,6 +14,9 @@ from pathlib import Path
 import httpx
 
 
+# Intentionally reimplemented (not imported from bridge.hmac_auth): this script
+# mimics an external Frankly client and stays decoupled from the bridge package.
+# Compatibility with the bridge is verified by tests/scripts/test_post_to_bridge.py.
 def _compute_file_sha256(file_path: Path) -> str:
     h = hashlib.sha256()
     with open(file_path, "rb") as f:
@@ -94,7 +97,8 @@ def main() -> int:
 
     print(f"[script] response: HTTP {response.status_code}")
     print(f"[script] body: {response.text}")
-    print("[script] check the uvicorn terminal for pipeline progress.")
+    if response.status_code == 202:
+        print("[script] check the uvicorn terminal for pipeline progress.")
 
     expected_status = (400,) if args.bad_hmac else (202,)
     return 0 if response.status_code in expected_status else 1
