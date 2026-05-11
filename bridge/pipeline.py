@@ -14,15 +14,19 @@ async def process_recording(
     timestamp: str,
 ) -> None:
     tmp_dir = file_path.parent
+    print(f"[bridge] pipeline start event_id={event_id} breakout_id={breakout_id}", flush=True)
 
     try:
         project_id = get_project_id(event_id)
+        print(f"[bridge] resolved project_id={project_id}", flush=True)
 
         # [1] Inspect file — extract audio if video
         file_type = inspect_file(file_path)
+        print(f"[bridge] inspected file type={file_type}", flush=True)
         if file_type == "video":
             audio_path = tmp_dir / "audio.webm"
             try:
+                print("[bridge] extracting audio", flush=True)
                 extract_audio(file_path, audio_path)
                 # file_path deleted by extract_audio
             except Exception:
@@ -35,17 +39,21 @@ async def process_recording(
 
         # [2] Detect mode by duration
         duration = get_duration(audio_path)
+        print(f"[bridge] duration={duration:.2f}s", flush=True)
 
         # [3] Initiate dembrane conversation
         conversation_id = await initiate_conversation(project_id, f"{event_id} / {breakout_id}")
+        print(f"[bridge] initiated conversation_id={conversation_id}", flush=True)
 
         # [4] Upload chunks
         if duration > 60:
             chunks_dir = tmp_dir / "chunks"
             chunks_dir.mkdir()
             chunks = split_into_chunks(audio_path, chunks_dir, chunk_duration=30)
-            for chunk in chunks:
+            print(f"[bridge] split into {len(chunks)} chunks", flush=True)
+            for i, chunk in enumerate(chunks, 1):
                 try:
+                    print(f"[bridge] uploading chunk {i}/{len(chunks)} ({chunk.name})", flush=True)
                     await upload_chunk(conversation_id, chunk, timestamp)
                     chunk.unlink()
                 except Exception:
@@ -59,6 +67,7 @@ async def process_recording(
         else:
             # Single chunk — audio file IS the chunk
             try:
+                print("[bridge] uploading single chunk (duration ≤ 60s)", flush=True)
                 await upload_chunk(conversation_id, audio_path, timestamp)
                 audio_path.unlink()
             except Exception:
@@ -66,7 +75,9 @@ async def process_recording(
                 raise
 
         # [5] Finish conversation
+        print(f"[bridge] finishing conversation_id={conversation_id}", flush=True)
         await finish_conversation(conversation_id)
+        print("[bridge] pipeline done", flush=True)
 
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)
