@@ -153,3 +153,5 @@ CLAUDE.md
 resources/
 
 docs/
+.superpowers/
+.env.bridge
