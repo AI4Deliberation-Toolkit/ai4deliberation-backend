@@ -96,7 +96,8 @@ def main() -> int:
     print(f"[script] body: {response.text}")
     print("[script] check the uvicorn terminal for pipeline progress.")
 
-    return 0 if response.status_code in (202, 400) else 1
+    expected_status = (400,) if args.bad_hmac else (202,)
+    return 0 if response.status_code in expected_status else 1
 
 
 if __name__ == "__main__":
