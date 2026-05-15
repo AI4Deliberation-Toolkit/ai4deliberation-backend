@@ -1,3 +1,7 @@
+# Taxonomy version. Bump on every edit affecting slugs, labels, or parent assignments.
+# Format: YYYY-MM-DD-N (N is the daily revision counter, starting at 1).
+TAXONOMY_VERSION = '2026-05-15-1'
+
 # Canonical topic list. Each entry: (slug, label_en).
 # Translations for other languages should be added to the Topic.labels JSON field
 # via the seed_taxonomy command or admin, before deploying to a new language pilot.
