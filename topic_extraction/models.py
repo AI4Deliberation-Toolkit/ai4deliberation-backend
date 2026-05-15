@@ -10,6 +10,7 @@ class Topic(models.Model):
     parent = models.ForeignKey(
         'self', null=True, blank=True, on_delete=models.SET_NULL, related_name='children'
     )
+    is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.slug

@@ -28,6 +28,16 @@ class TopicModelTest(TestCase):
         self.assertIn(child, parent.children.all())
 
 
+class TopicIsActiveTest(TestCase):
+    def test_topic_defaults_to_active(self):
+        t = Topic.objects.create(slug='test_x', label_en='Test X')
+        self.assertTrue(t.is_active)
+
+    def test_topic_can_be_deactivated(self):
+        t = Topic.objects.create(slug='test_y', label_en='Test Y', is_active=False)
+        self.assertFalse(t.is_active)
+
+
 class ArticleTopicModelTest(TestCase):
     def test_create_article_topic(self):
         record = ArticleTopic.objects.create(
