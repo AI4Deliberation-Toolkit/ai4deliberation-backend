@@ -138,3 +138,8 @@ EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='intfloat/multilin
 ZERO_SHOT_MODEL_NAME = config('ZERO_SHOT_MODEL_NAME', default='MoritzLaurer/mDeBERTa-v3-base-mnli-xnli')
 LLM_MODEL_NAME = config('LLM_MODEL_NAME', default='Qwen/Qwen2.5-3B-Instruct')
 EMBEDDING_THRESHOLD = float(config('EMBEDDING_THRESHOLD', default='0.35'))
+
+# Topic extraction — language coverage
+TOPIC_LANGUAGES = ['en', 'el', 'de']
+DEFAULT_LANGUAGE = 'en'
+LANG_DETECT_MIN_CHARS = 30
