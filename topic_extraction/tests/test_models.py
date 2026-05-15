@@ -70,3 +70,20 @@ class ArticleTopicModelTest(TestCase):
             )
         records = list(ArticleTopic.objects.filter(article_id='art-1'))
         self.assertGreaterEqual(records[0].computed_at, records[1].computed_at)
+
+
+class ArticleTopicTaxonomyVersionTest(TestCase):
+    def test_existing_rows_default_to_empty_string(self):
+        at = ArticleTopic.objects.create(
+            article_id='a1', platform='p1', language='en',
+            raw_topics=[], normalized=[], backend='embedding',
+        )
+        self.assertEqual(at.taxonomy_version, '')
+
+    def test_taxonomy_version_can_be_set(self):
+        at = ArticleTopic.objects.create(
+            article_id='a2', platform='p1', language='en',
+            raw_topics=[], normalized=[], backend='embedding',
+            taxonomy_version='2026-05-15-1',
+        )
+        self.assertEqual(at.taxonomy_version, '2026-05-15-1')
