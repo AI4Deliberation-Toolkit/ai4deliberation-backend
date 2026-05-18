@@ -1,5 +1,6 @@
 from io import StringIO
 from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import TestCase
 from topic_extraction.models import Topic
 from topic_extraction import taxonomy_data
@@ -55,7 +56,7 @@ class SeedTaxonomyCommandTest(TestCase):
             {'slug': 'orphan_x', 'label_en': 'Orphan', 'parent': 'no_such_parent', 'labels': {}}
         ]
         with patch.object(taxonomy_data, 'LEAVES', bad_leaves):
-            with self.assertRaises(Exception):
+            with self.assertRaises(CommandError):
                 call_command('seed_taxonomy')
 
     def test_invalidates_cache(self):
