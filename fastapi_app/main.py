@@ -508,6 +508,9 @@ def extract_conversation(payload: ConversationIn):
             comments=payload.comments,
         )
     except Exception as e:
+        # TODO(task-18): split ValueError (unsupported explicit language) → 400
+        # from generic Exception → 500. Pipeline now raises ValueError per its
+        # docstring contract when explicit_language is not in TOPIC_LANGUAGES.
         raise HTTPException(status_code=500, detail=f'Topic extraction failed: {e}')
     return {
         "id": str(record.id),

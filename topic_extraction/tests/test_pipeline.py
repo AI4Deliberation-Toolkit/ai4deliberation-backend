@@ -102,3 +102,13 @@ class PipelineLanguageOverrideTest(TestCase):
             article='hi', comments=[],
         )
         self.assertEqual(record.language_source, 'default')
+
+    def test_unsupported_explicit_language_raises(self):
+        # Locks the docstring contract: pipeline.run propagates ValueError from
+        # detect_language so the view layer (Task 15) can map to HTTP 400.
+        with self.assertRaises(ValueError):
+            pipeline.run(
+                article_id='a4', platform='p1',
+                article='text', comments=[],
+                explicit_language='ko',  # not in TOPIC_LANGUAGES
+            )

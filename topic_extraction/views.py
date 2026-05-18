@@ -24,6 +24,9 @@ class ExtractConversationView(views.APIView):
                 comments=request.data.get('comments', []),
             )
         except Exception as e:
+            # TODO(task-15): split ValueError (unsupported explicit language) → 400
+            # from generic Exception → 500. Pipeline now raises ValueError per its
+            # docstring contract when explicit_language is not in TOPIC_LANGUAGES.
             return Response(
                 {'detail': 'Topic extraction failed.', 'error': str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
