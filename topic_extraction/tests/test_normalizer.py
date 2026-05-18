@@ -64,17 +64,18 @@ class TaxonomyTest(TestCase):
 
 class NormalizerTest(TestCase):
     def setUp(self):
+        parent = Topic.objects.create(slug='governance', label_en='Governance', labels={})
         Topic.objects.create(slug='education_policy', label_en='Education Policy',
-                             labels={'el': 'Εκπαιδευτική Πολιτική'})
+                             labels={'el': 'Εκπαιδευτική Πολιτική'}, parent=parent)
         Topic.objects.create(slug='climate_change', label_en='Climate Change',
-                             labels={'el': 'Κλιματική Αλλαγή'})
+                             labels={'el': 'Κλιματική Αλλαγή'}, parent=parent)
         invalidate_taxonomy_cache()
 
     @patch('topic_extraction.normalizer.get_taxonomy_embeddings')
     @patch('topic_extraction.normalizer.get_embedding_model')
     def test_maps_raw_topic_to_nearest_taxonomy_node(self, mock_model_fn, mock_taxonomy_fn):
         from topic_extraction.models import Topic
-        topics = list(Topic.objects.all())
+        topics = list(Topic.objects.filter(parent__isnull=False))
         # education_policy embedding
         taxonomy_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
         mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
@@ -93,7 +94,7 @@ class NormalizerTest(TestCase):
     @patch('topic_extraction.normalizer.get_embedding_model')
     def test_deduplicates_same_taxonomy_node(self, mock_model_fn, mock_taxonomy_fn):
         from topic_extraction.models import Topic
-        topics = list(Topic.objects.all())
+        topics = list(Topic.objects.filter(parent__isnull=False))
         taxonomy_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
         mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
 
@@ -120,7 +121,7 @@ class NormalizerTest(TestCase):
     @patch('topic_extraction.normalizer.get_embedding_model')
     def test_filters_below_threshold(self, mock_model_fn, mock_taxonomy_fn):
         from topic_extraction.models import Topic
-        topics = list(Topic.objects.all())
+        topics = list(Topic.objects.filter(parent__isnull=False))
         taxonomy_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
         mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
 
