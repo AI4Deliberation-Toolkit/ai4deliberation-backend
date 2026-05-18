@@ -9,10 +9,11 @@ from topic_extraction.normalizer import normalize, NormalizedTopic
 
 class TaxonomyTest(TestCase):
     def setUp(self):
+        parent = Topic.objects.create(slug='governance', label_en='Governance', labels={})
         Topic.objects.create(slug='education_policy', label_en='Education Policy',
-                             labels={'el': 'Εκπαιδευτική Πολιτική'})
+                             labels={'el': 'Εκπαιδευτική Πολιτική'}, parent=parent)
         Topic.objects.create(slug='climate_change', label_en='Climate Change',
-                             labels={'el': 'Κλιματική Αλλαγή'})
+                             labels={'el': 'Κλιματική Αλλαγή'}, parent=parent)
         invalidate_taxonomy_cache()
 
     @patch('topic_extraction.taxonomy.get_embedding_model')
