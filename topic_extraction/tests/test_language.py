@@ -22,11 +22,16 @@ class DetectLanguageTest(TestCase):
         self.assertEqual(source, 'detected')
 
     def test_detected_unsupported_falls_back_to_default(self):
-        # French passage; detection should succeed but result not in TOPIC_LANGUAGES
+        # French passage; detection should succeed but result not in TOPIC_LANGUAGES.
+        # The contract includes emitting a warning log with the detected code so
+        # operators can see unsupported languages arriving in production.
         text = "Ceci est un texte de test en français pour la détection de la langue parlée."
-        lang, source = detect_language(text)
+        with self.assertLogs('topic_extraction.language', level='WARNING') as cm:
+            lang, source = detect_language(text)
         self.assertEqual(lang, 'en')
         self.assertEqual(source, 'default')
+        self.assertTrue(any('Unsupported language detected: fr' in m for m in cm.output),
+                        f'Expected warning naming detected code, got: {cm.output}')
 
     def test_short_text_skips_detection(self):
         lang, source = detect_language('hi')  # < 30 chars

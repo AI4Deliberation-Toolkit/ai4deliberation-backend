@@ -14,7 +14,7 @@ class PipelineRunTest(TestCase):
     @patch('topic_extraction.pipeline._get_extractor')
     @patch('topic_extraction.pipeline.detect_language')
     def test_creates_article_topic_record(self, mock_detect, mock_get_extractor, mock_normalize):
-        mock_detect.return_value = 'el'
+        mock_detect.return_value = ('el', 'detected')
         mock_extractor = MagicMock()
         mock_extractor.extract.return_value = [TopicResult(label='Εκπαιδευτική Πολιτική', score=0.9)]
         mock_get_extractor.return_value = mock_extractor
@@ -35,7 +35,7 @@ class PipelineRunTest(TestCase):
     def test_falls_back_to_embedding_extractor_on_llm_failure(
         self, mock_detect, mock_get_extractor, mock_normalize
     ):
-        mock_detect.return_value = 'el'
+        mock_detect.return_value = ('el', 'detected')
         mock_llm = MagicMock()
         mock_llm.extract.side_effect = ValueError('LLM parse error')
         mock_get_extractor.return_value = mock_llm
@@ -56,7 +56,7 @@ class PipelineRunTest(TestCase):
     @patch('topic_extraction.pipeline._get_extractor')
     @patch('topic_extraction.pipeline.detect_language')
     def test_stores_backend_used(self, mock_detect, mock_get_extractor, mock_normalize):
-        mock_detect.return_value = 'en'
+        mock_detect.return_value = ('en', 'default')
         mock_extractor = MagicMock()
         mock_extractor.extract.return_value = []
         mock_get_extractor.return_value = mock_extractor

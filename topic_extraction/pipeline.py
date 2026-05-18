@@ -31,7 +31,7 @@ def run(article_id: str, platform: str, article: str, comments: list[str]) -> Ar
     Returns:
         Newly created ArticleTopic instance.
     """
-    language = detect_language(article, comments)
+    language, _source = detect_language(article, comments)
 
     extractor = _get_extractor()
     backend = getattr(settings, 'EXTRACTION_BACKEND', 'embedding')
