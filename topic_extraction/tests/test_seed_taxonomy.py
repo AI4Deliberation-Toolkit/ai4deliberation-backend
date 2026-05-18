@@ -2,69 +2,68 @@ from io import StringIO
 from django.core.management import call_command
 from django.test import TestCase
 from topic_extraction.models import Topic
+from topic_extraction import taxonomy_data
 
 
 class SeedTaxonomyCommandTest(TestCase):
-    def test_creates_expected_topic_count(self):
-        """First run should create exactly 72 topics from INITIAL_TOPICS."""
+    def test_creates_parents_and_leaves(self):
         out = StringIO()
         call_command('seed_taxonomy', stdout=out)
-        self.assertEqual(Topic.objects.count(), 72)
-        self.assertIn('Created: 72', out.getvalue())
+        expected_total = len(taxonomy_data.PARENTS) + len(taxonomy_data.LEAVES)
+        self.assertEqual(Topic.objects.count(), expected_total)
 
     def test_is_idempotent(self):
-        """Re-running the command should not create duplicates."""
-        # First run
         call_command('seed_taxonomy')
-        # Second run
-        out = StringIO()
-        call_command('seed_taxonomy', stdout=out)
-        # Should still have 72 topics
-        self.assertEqual(Topic.objects.count(), 72)
-        # Output should indicate all were skipped
-        self.assertIn('skipped (already exist): 72', out.getvalue())
-
-    def test_topics_have_correct_label_en(self):
-        """Created topics should have correct label_en values."""
+        first_count = Topic.objects.count()
         call_command('seed_taxonomy')
-        # Test a few known topics
-        democracy = Topic.objects.get(slug='democracy')
-        self.assertEqual(democracy.label_en, 'Democracy')
+        self.assertEqual(Topic.objects.count(), first_count)
 
-        climate_change = Topic.objects.get(slug='climate_change')
-        self.assertEqual(climate_change.label_en, 'Climate Change')
-
-        artificial_intelligence = Topic.objects.get(slug='artificial_intelligence')
-        self.assertEqual(artificial_intelligence.label_en, 'Artificial Intelligence')
-
-    def test_topics_have_empty_labels_dict(self):
-        """Created topics should have empty labels dict initially."""
+    def test_leaves_have_parent_set(self):
         call_command('seed_taxonomy')
-        # Test a few topics
-        democracy = Topic.objects.get(slug='democracy')
-        self.assertEqual(democracy.labels, {})
+        # Pick the first leaf, look it up, confirm parent is wired
+        sample_leaf = taxonomy_data.LEAVES[0]
+        leaf = Topic.objects.get(slug=sample_leaf['slug'])
+        self.assertIsNotNone(leaf.parent)
+        self.assertEqual(leaf.parent.slug, sample_leaf['parent'])
 
-        education_policy = Topic.objects.get(slug='education_policy')
-        self.assertEqual(education_policy.labels, {})
-
-    def test_all_topics_unique_by_slug(self):
-        """All created topics should have unique slugs."""
+    def test_parents_have_no_parent(self):
         call_command('seed_taxonomy')
-        # If we get here without IntegrityError, uniqueness constraint passed
-        # Also verify count matches
-        self.assertEqual(Topic.objects.count(), 72)
+        sample_parent = taxonomy_data.PARENTS[0]
+        parent = Topic.objects.get(slug=sample_parent['slug'])
+        self.assertIsNone(parent.parent)
 
-    def test_multiple_runs_create_no_new_topics(self):
-        """Running the command 3 times should result in same topic count."""
+    def test_removed_slug_is_deactivated(self):
         call_command('seed_taxonomy')
-        count_after_first = Topic.objects.count()
-
+        # Manually add a stale topic that's not in PARENTS or LEAVES
+        Topic.objects.create(slug='stale_topic', label_en='Stale', is_active=True)
         call_command('seed_taxonomy')
-        count_after_second = Topic.objects.count()
+        self.assertFalse(Topic.objects.get(slug='stale_topic').is_active)
 
+    def test_admin_deactivation_survives_reseed(self):
         call_command('seed_taxonomy')
-        count_after_third = Topic.objects.count()
+        sample_slug = taxonomy_data.LEAVES[0]['slug']
+        leaf = Topic.objects.get(slug=sample_slug)
+        leaf.is_active = False
+        leaf.save()
+        call_command('seed_taxonomy')
+        self.assertFalse(Topic.objects.get(slug=sample_slug).is_active)
 
-        self.assertEqual(count_after_first, 72)
-        self.assertEqual(count_after_second, 72)
-        self.assertEqual(count_after_third, 72)
+    def test_orphan_leaf_aborts(self):
+        # Patch LEAVES temporarily to include a leaf pointing at a missing parent
+        from unittest.mock import patch
+        bad_leaves = taxonomy_data.LEAVES + [
+            {'slug': 'orphan_x', 'label_en': 'Orphan', 'parent': 'no_such_parent', 'labels': {}}
+        ]
+        with patch.object(taxonomy_data, 'LEAVES', bad_leaves):
+            with self.assertRaises(Exception):
+                call_command('seed_taxonomy')
+
+    def test_invalidates_cache(self):
+        from topic_extraction import taxonomy
+        # Populate cache
+        call_command('seed_taxonomy')
+        _ = taxonomy.get_taxonomy_embeddings('en')  # warms cache
+        self.assertIn('en', taxonomy._taxonomy_cache)
+        # Re-seed; cache should be empty
+        call_command('seed_taxonomy')
+        self.assertNotIn('en', taxonomy._taxonomy_cache)
