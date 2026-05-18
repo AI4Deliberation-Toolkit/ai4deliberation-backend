@@ -13,7 +13,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         languages = list(settings.TOPIC_LANGUAGES)
         # The canonical English label is on label_en, not labels['en']. Skip 'en'.
-        languages_to_check = [l for l in languages if l != 'en']
+        languages_to_check = [lang for lang in languages if lang != 'en']
 
         gaps = []
         for topic in Topic.objects.filter(is_active=True):

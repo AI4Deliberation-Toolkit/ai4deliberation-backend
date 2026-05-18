@@ -43,3 +43,34 @@ class ValidateTaxonomyCommandTest(TestCase):
         out = StringIO()
         call_command('validate_taxonomy', stdout=out)
         self.assertIn('OK', out.getvalue())
+
+    @override_settings(TOPIC_LANGUAGES=['en', 'el'])
+    def test_empty_string_translation_counts_as_missing(self):
+        # An empty-string label is operator error during seeding — must fail validation.
+        for topic in Topic.objects.filter(is_active=True):
+            topic.labels = {'el': ''}
+            topic.save()
+        with self.assertRaises(CommandError):
+            call_command('validate_taxonomy')
+
+    @override_settings(TOPIC_LANGUAGES=['en', 'el', 'de'])
+    def test_partial_coverage_identifies_missing_language(self):
+        # Translate to 'el' but not 'de'; only de should appear in the error.
+        for topic in Topic.objects.filter(is_active=True):
+            topic.labels = {'el': f'{topic.label_en}_el'}
+            topic.save()
+        with self.assertRaises(CommandError) as cm:
+            call_command('validate_taxonomy')
+        message = str(cm.exception)
+        self.assertIn('missing translation for de', message)
+        self.assertNotIn('missing translation for el', message)
+
+    @override_settings(TOPIC_LANGUAGES=['en', 'el'])
+    def test_error_message_identifies_slug(self):
+        # Confirm the (slug, lang) pair is named in the error so operators can act on it.
+        sample_slug = Topic.objects.filter(is_active=True).first().slug
+        with self.assertRaises(CommandError) as cm:
+            call_command('validate_taxonomy')
+        message = str(cm.exception)
+        self.assertIn(sample_slug, message)
+        self.assertIn('missing translation for el', message)
