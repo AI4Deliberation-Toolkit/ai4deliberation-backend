@@ -44,6 +44,7 @@ class Command(BaseCommand):
 
         renormalized = 0
         skipped_empty = 0
+        failed = 0
 
         for record in targets:
             if not record.raw_topics:
@@ -51,33 +52,45 @@ class Command(BaseCommand):
                 self.stdout.write(f'  skipped (empty raw_topics): {record.article_id}')
                 continue
 
-            # Stored raw_topics is JSON: list of {'label': str, 'score': number}.
-            # Rehydrate into TopicResult so normalize() sees its expected input shape.
-            # float() is defensive: JSON round-trip may surface scores as int.
-            raw_results = [
-                TopicResult(label=item['label'], score=float(item['score']))
-                for item in record.raw_topics
-            ]
-            normalized = normalize(raw_results, record.language)
+            try:
+                # Stored raw_topics is JSON: list of {'label': str, 'score': number}.
+                # Rehydrate into TopicResult so normalize() sees its expected input shape.
+                # float() is defensive: JSON round-trip may surface scores as int.
+                # Future-proofing note: extra keys on stored dicts are silently dropped
+                # here. If the raw shape ever gains a third field, update this comprehension.
+                raw_results = [
+                    TopicResult(label=item['label'], score=float(item['score']))
+                    for item in record.raw_topics
+                ]
+                normalized = normalize(raw_results, record.language)
 
-            # New row mirrors the source row's stored fields (raw_topics, language,
-            # language_source, backend) and stamps the current TAXONOMY_VERSION.
-            # The source text is not stored, so language cannot be re-detected here;
-            # carrying the stored value preserves the "re-normalize, not re-extract"
-            # contract. Below-threshold results still write a row with normalized=[]
-            # so operators can see the row was reconsidered.
-            ArticleTopic.objects.create(
-                article_id=record.article_id,
-                platform=record.platform,
-                language=record.language,
-                language_source=record.language_source,
-                raw_topics=record.raw_topics,
-                normalized=[{'topic_id': n.topic_id, 'score': n.score} for n in normalized],
-                backend=record.backend,
-                taxonomy_version=TAXONOMY_VERSION,
-            )
-            renormalized += 1
+                # New row mirrors the source row's stored fields (raw_topics, language,
+                # language_source, backend) and stamps the current TAXONOMY_VERSION.
+                # The source text is not stored, so language cannot be re-detected here;
+                # carrying the stored value preserves the "re-normalize, not re-extract"
+                # contract. Below-threshold results still write a row with normalized=[]
+                # so operators can see the row was reconsidered.
+                ArticleTopic.objects.create(
+                    article_id=record.article_id,
+                    platform=record.platform,
+                    language=record.language,
+                    language_source=record.language_source,
+                    raw_topics=record.raw_topics,
+                    normalized=[{'topic_id': n.topic_id, 'score': n.score} for n in normalized],
+                    backend=record.backend,
+                    taxonomy_version=TAXONOMY_VERSION,
+                )
+                renormalized += 1
+            except Exception as e:
+                # Per-row isolation: an individual failure (malformed raw_topics,
+                # DB constraint, etc.) is logged but does not abort the loop.
+                # Operators see counts in the summary plus a stderr line per failure.
+                failed += 1
+                self.stderr.write(
+                    f'  FAILED ({type(e).__name__}): {record.article_id} — {e}'
+                )
 
         self.stdout.write(self.style.SUCCESS(
-            f'Done. Re-normalized: {renormalized}, skipped (empty raw_topics): {skipped_empty}'
+            f'Done. Re-normalized: {renormalized}, '
+            f'skipped (empty raw_topics): {skipped_empty}, failed: {failed}'
         ))
