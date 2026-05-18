@@ -32,6 +32,7 @@ class ArticleTopic(models.Model):
     normalized = models.JSONField(default=list)
     backend = models.CharField(max_length=20, choices=BACKEND_CHOICES)
     taxonomy_version = models.CharField(max_length=20, blank=True, default='')
+    language_source = models.CharField(max_length=20, blank=True, default='')
     computed_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):

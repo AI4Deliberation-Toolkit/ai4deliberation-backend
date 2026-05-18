@@ -4,6 +4,7 @@ from topic_extraction.extractors.base import BaseExtractor
 from topic_extraction.language import detect_language
 from topic_extraction.models import ArticleTopic
 from topic_extraction.normalizer import normalize
+from topic_extraction.taxonomy_data import TAXONOMY_VERSION
 
 
 def _get_extractor() -> BaseExtractor:
@@ -15,23 +16,30 @@ def _get_extractor() -> BaseExtractor:
     return EmbeddingExtractor()
 
 
-def run(article_id: str, platform: str, article: str, comments: list[str]) -> ArticleTopic:
-    """Run the full topic extraction pipeline for a single conversation.
-
-    Detects language, extracts free-form topics, normalises to taxonomy,
-    and persists an ArticleTopic record. LLM failures fall back to
-    EmbeddingExtractor automatically.
+def run(
+    article_id: str,
+    platform: str,
+    article: str,
+    comments: list[str],
+    explicit_language: str | None = None,
+) -> ArticleTopic:
+    """Detect language → extract → normalize → persist a new ArticleTopic row.
 
     Args:
-        article_id: Opaque external identifier from the source platform.
+        article_id: External identifier from the source platform.
         platform: Pilot site identifier.
-        article: Main article or section text.
-        comments: List of comment strings (threading already flattened).
+        article: Main text.
+        comments: Flattened list of comment strings.
+        explicit_language: Optional ISO 639-1 override. If supplied, bypasses
+            auto-detection. Must be in settings.TOPIC_LANGUAGES.
 
     Returns:
-        Newly created ArticleTopic instance.
+        The newly created ArticleTopic.
+
+    Raises:
+        ValueError: if explicit_language is not in settings.TOPIC_LANGUAGES.
     """
-    language, _source = detect_language(article, comments)
+    language, language_source = detect_language(article, comments, explicit=explicit_language)
 
     extractor = _get_extractor()
     backend = getattr(settings, 'EXTRACTION_BACKEND', 'embedding')
@@ -48,7 +56,9 @@ def run(article_id: str, platform: str, article: str, comments: list[str]) -> Ar
         article_id=article_id,
         platform=platform,
         language=language,
+        language_source=language_source,
         raw_topics=[{'label': t.label, 'score': t.score} for t in raw_topics],
         normalized=[{'topic_id': n.topic_id, 'score': n.score} for n in normalized],
         backend=backend,
+        taxonomy_version=TAXONOMY_VERSION,
     )

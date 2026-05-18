@@ -87,3 +87,20 @@ class ArticleTopicTaxonomyVersionTest(TestCase):
             taxonomy_version='2026-05-15-1',
         )
         self.assertEqual(at.taxonomy_version, '2026-05-15-1')
+
+
+class ArticleTopicLanguageSourceTest(TestCase):
+    def test_existing_rows_default_to_empty_string(self):
+        at = ArticleTopic.objects.create(
+            article_id='a1', platform='p1', language='en',
+            raw_topics=[], normalized=[], backend='embedding',
+        )
+        self.assertEqual(at.language_source, '')
+
+    def test_language_source_can_be_set(self):
+        at = ArticleTopic.objects.create(
+            article_id='a2', platform='p1', language='en',
+            raw_topics=[], normalized=[], backend='embedding',
+            language_source='explicit',
+        )
+        self.assertEqual(at.language_source, 'explicit')

@@ -1,6 +1,7 @@
 from unittest.mock import patch, MagicMock
+from django.core.management import call_command
 from django.test import TestCase
-from topic_extraction import pipeline
+from topic_extraction import pipeline, taxonomy_data
 from topic_extraction.extractors.base import TopicResult
 from topic_extraction.normalizer import NormalizedTopic
 from topic_extraction.models import ArticleTopic, Topic
@@ -66,3 +67,38 @@ class PipelineRunTest(TestCase):
             record = pipeline.run('art-3', 'ypepth', 'text', [])
 
         self.assertEqual(record.backend, 'embedding')
+
+
+class PipelineLanguageOverrideTest(TestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+
+    @patch('topic_extraction.pipeline._get_extractor')
+    def test_explicit_language_overrides_detection(self, mock_extractor):
+        mock_extractor.return_value.extract.return_value = []
+        record = pipeline.run(
+            article_id='a1', platform='p1',
+            article='Αυτό είναι ελληνικά.',  # Greek
+            comments=[],
+            explicit_language='de',  # but caller forces German
+        )
+        self.assertEqual(record.language, 'de')
+
+    @patch('topic_extraction.pipeline._get_extractor')
+    def test_taxonomy_version_stored(self, mock_extractor):
+        mock_extractor.return_value.extract.return_value = []
+        record = pipeline.run(
+            article_id='a2', platform='p1',
+            article='Hello world this is English text long enough for detection.',
+            comments=[],
+        )
+        self.assertEqual(record.taxonomy_version, taxonomy_data.TAXONOMY_VERSION)
+
+    @patch('topic_extraction.pipeline._get_extractor')
+    def test_language_source_default_recorded_when_short(self, mock_extractor):
+        mock_extractor.return_value.extract.return_value = []
+        record = pipeline.run(
+            article_id='a3', platform='p1',
+            article='hi', comments=[],
+        )
+        self.assertEqual(record.language_source, 'default')
