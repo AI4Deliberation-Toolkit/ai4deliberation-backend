@@ -1,29 +1,41 @@
-from django.test import TestCase
-from unittest.mock import patch
+import logging
+from django.test import TestCase, override_settings
 from topic_extraction.language import detect_language
 
 
+@override_settings(TOPIC_LANGUAGES=['en', 'el', 'de'], DEFAULT_LANGUAGE='en', LANG_DETECT_MIN_CHARS=30)
 class DetectLanguageTest(TestCase):
-    def test_detects_greek(self):
-        greek_text = 'Η εκπαιδευτική πολιτική είναι σημαντική για τη χώρα μας.'
-        result = detect_language(greek_text)
-        self.assertEqual(result, 'el')
+    def test_explicit_supported_language_used(self):
+        lang, source = detect_language('hello world', explicit='el')
+        self.assertEqual(lang, 'el')
+        self.assertEqual(source, 'explicit')
 
-    def test_detects_english(self):
-        english_text = 'The education policy is very important for our country.'
-        result = detect_language(english_text)
-        self.assertEqual(result, 'en')
+    def test_explicit_unsupported_raises(self):
+        with self.assertRaises(ValueError):
+            detect_language('hello world', explicit='fr')
 
-    def test_returns_fallback_on_very_short_text(self):
-        result = detect_language('???', fallback='en')
-        self.assertEqual(result, 'en')
+    def test_detected_supported(self):
+        # A clearly Greek passage longer than 30 chars
+        text = 'Αυτό είναι ένα δοκιμαστικό κείμενο για ανίχνευση γλώσσας στα ελληνικά.'
+        lang, source = detect_language(text)
+        self.assertEqual(lang, 'el')
+        self.assertEqual(source, 'detected')
 
-    def test_uses_article_and_first_three_comments(self):
-        with patch('topic_extraction.language.detect') as mock_detect:
-            mock_detect.return_value = 'el'
-            detect_language('article text', ['c1', 'c2', 'c3', 'c4', 'c5'])
-            # Should concatenate article + first 3 comments only
-            called_text = mock_detect.call_args[0][0]
-            self.assertIn('c1', called_text)
-            self.assertIn('c3', called_text)
-            self.assertNotIn('c4', called_text)
+    def test_detected_unsupported_falls_back_to_default(self):
+        # French passage; detection should succeed but result not in TOPIC_LANGUAGES
+        text = "Ceci est un texte de test en français pour la détection de la langue parlée."
+        lang, source = detect_language(text)
+        self.assertEqual(lang, 'en')
+        self.assertEqual(source, 'default')
+
+    def test_short_text_skips_detection(self):
+        lang, source = detect_language('hi')  # < 30 chars
+        self.assertEqual(lang, 'en')
+        self.assertEqual(source, 'default')
+
+    def test_failed_detection_falls_back(self):
+        # Pathological input that may crash langdetect
+        text = '!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!'
+        lang, source = detect_language(text)
+        self.assertEqual(lang, 'en')
+        self.assertEqual(source, 'default')
