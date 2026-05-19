@@ -37,12 +37,13 @@ class ValidateTaxonomyCommandTest(TestCase):
 
     @override_settings(TOPIC_LANGUAGES=['en', 'el'])
     def test_skips_deactivated_rows(self):
-        # Deactivate one row, do not add 'el' translation; command should still pass
-        # if all OTHER rows have 'el', which they don't here — so deactivate all without 'el'.
-        for topic in Topic.objects.filter(is_active=True):
-            if 'el' not in topic.labels:
-                topic.is_active = False
-                topic.save()
+        # Strip 'el' from a few rows and deactivate them. Validation should still
+        # pass because the validator skips deactivated rows — even though those
+        # rows are missing the required 'el' label.
+        for topic in Topic.objects.filter(is_active=True)[:3]:
+            topic.labels = {}
+            topic.is_active = False
+            topic.save()
         out = StringIO()
         call_command('validate_taxonomy', stdout=out)
         self.assertIn('OK', out.getvalue())
