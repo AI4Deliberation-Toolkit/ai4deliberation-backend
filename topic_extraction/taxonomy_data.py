@@ -1,6 +1,6 @@
 # Taxonomy version. Bump on every edit affecting slugs, labels, or parent assignments.
 # Format: YYYY-MM-DD-N (N is the daily revision counter, starting at 1).
-TAXONOMY_VERSION = '2026-05-19-1'
+TAXONOMY_VERSION = '2026-05-20-1'
 
 # Parent categories. 18 entries. Used only for aggregation (clustering rollups,
 # dashboard summaries). The extractor never returns a parent slug as topic_id.
@@ -114,7 +114,7 @@ LEAVES = [
     # --- technology ---
     {'slug': 'algorithmic_decision_making', 'label_en': 'Algorithmic Decision Making', 'parent': 'technology', 'labels': {'el': 'Αλγοριθμική Λήψη Αποφάσεων'}},
     {'slug': 'artificial_intelligence', 'label_en': 'Artificial Intelligence', 'parent': 'technology', 'labels': {'el': 'Τεχνητή Νοημοσύνη'}},
-    {'slug': 'automation', 'label_en': 'Automation', 'parent': 'technology', 'labels': {'el': 'Αυτοματισμός'}},
+    {'slug': 'automation', 'label_en': 'Automation', 'parent': 'technology', 'labels': {'el': 'Αυτοματοποίηση'}},
     {'slug': 'bias_and_fairness', 'label_en': 'Bias and Fairness', 'parent': 'technology', 'labels': {'el': 'Προκατάληψη & Αμεροληψία'}},
     {'slug': 'cybersecurity', 'label_en': 'Cybersecurity', 'parent': 'technology', 'labels': {'el': 'Κυβερνοασφάλεια'}},
     {'slug': 'data_governance', 'label_en': 'Data Governance', 'parent': 'technology', 'labels': {'el': 'Διακυβέρνηση Δεδομένων'}},
