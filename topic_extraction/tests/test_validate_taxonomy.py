@@ -18,7 +18,10 @@ class ValidateTaxonomyCommandTest(TestCase):
 
     @override_settings(TOPIC_LANGUAGES=['en', 'el'])
     def test_fails_when_translation_missing(self):
-        # No labels for 'el' are seeded; command should fail.
+        # Strip the 'el' labels that were seeded, then validate should fail.
+        for topic in Topic.objects.filter(is_active=True):
+            topic.labels = {}
+            topic.save()
         with self.assertRaises(CommandError):
             call_command('validate_taxonomy')
 
@@ -68,7 +71,11 @@ class ValidateTaxonomyCommandTest(TestCase):
     @override_settings(TOPIC_LANGUAGES=['en', 'el'])
     def test_error_message_identifies_slug(self):
         # Confirm the (slug, lang) pair is named in the error so operators can act on it.
+        # Strip 'el' labels first so the validate command has something to complain about.
         sample_slug = Topic.objects.filter(is_active=True).first().slug
+        for topic in Topic.objects.filter(is_active=True):
+            topic.labels = {}
+            topic.save()
         with self.assertRaises(CommandError) as cm:
             call_command('validate_taxonomy')
         message = str(cm.exception)

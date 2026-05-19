@@ -39,3 +39,15 @@ class TaxonomyStructureTest(TestCase):
     def test_no_duplicate_slugs(self):
         all_slugs = [p['slug'] for p in taxonomy_data.PARENTS] + [leaf['slug'] for leaf in taxonomy_data.LEAVES]
         self.assertEqual(len(all_slugs), len(set(all_slugs)))
+
+    def test_every_entry_has_greek_label(self):
+        for p in taxonomy_data.PARENTS:
+            self.assertIn('el', p['labels'],
+                          f"Parent {p['slug']!r} is missing labels['el']")
+            self.assertTrue(p['labels']['el'],
+                            f"Parent {p['slug']!r} has an empty labels['el']")
+        for leaf in taxonomy_data.LEAVES:
+            self.assertIn('el', leaf['labels'],
+                          f"Leaf {leaf['slug']!r} is missing labels['el']")
+            self.assertTrue(leaf['labels']['el'],
+                            f"Leaf {leaf['slug']!r} has an empty labels['el']")
