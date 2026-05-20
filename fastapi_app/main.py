@@ -6,7 +6,7 @@ import django
 import numpy as np
 from bertopic import BERTopic
 from django.apps import apps as django_apps
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Response, Header
 from pydantic import BaseModel
 from sentence_transformers import SentenceTransformer, util
 from transformers import pipeline
@@ -17,6 +17,7 @@ if not django_apps.ready:
     django.setup()
 
 from ai_tools.utils import categorization
+from topic_extraction import pipeline as topic_pipeline
 
 app = FastAPI()
 
@@ -300,6 +301,7 @@ class ConversationIn(BaseModel):
     platform: str
     article: str
     comments: list[str] = []
+    language: str | None = None
 
 class ConversationTopicsOut(BaseModel):
     id: str
@@ -497,42 +499,103 @@ def extract_single(payload: SingleArticleInput):
     }
 
 
-@app.post("/topics/extract-conversation", response_model=ConversationTopicsOut)
-def extract_conversation(payload: ConversationIn):
-    from topic_extraction import pipeline
+@app.post("/topics/extract-conversation")
+def extract_conversation(payload: ConversationIn, include_labels: bool = False, include_raw: bool = False):
     try:
-        record = pipeline.run(
+        record = topic_pipeline.run(
             article_id=payload.article_id,
             platform=payload.platform,
             article=payload.article,
             comments=payload.comments,
+            explicit_language=payload.language,
         )
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        # TODO(task-18): split ValueError (unsupported explicit language) → 400
-        # from generic Exception → 500. Pipeline now raises ValueError per its
-        # docstring contract when explicit_language is not in TOPIC_LANGUAGES.
         raise HTTPException(status_code=500, detail=f'Topic extraction failed: {e}')
-    return {
-        "id": str(record.id),
-        "language": record.language,
-        "raw_topics": record.raw_topics,
-        "normalized": record.normalized,
-        "backend": record.backend,
+
+    body = {
+        'id': str(record.id),
+        'article_id': record.article_id,
+        'platform': record.platform,
+        'language': record.language,
+        'language_source': record.language_source,
+        'normalized': _serialize_normalized_fastapi(record.normalized, include_labels, record.language),
+        'backend': record.backend,
+        'computed_at': record.computed_at.isoformat(),
+        'taxonomy_version': record.taxonomy_version,
     }
+    if include_raw:
+        body['raw_topics'] = record.raw_topics
+    return body
+
+
+def _serialize_normalized_fastapi(normalized, include_labels, language):
+    if not include_labels:
+        return normalized
+    from topic_extraction.models import Topic
+    slugs = [n['topic_id'] for n in normalized]
+    topic_map = {t.slug: t for t in Topic.objects.filter(slug__in=slugs).select_related('parent')}
+    out = []
+    for n in normalized:
+        topic = topic_map.get(n['topic_id'])
+        if topic is None or not topic.is_active:
+            out.append({**n, 'label': None, 'parent': None})
+        else:
+            label = topic.labels.get(language) or topic.label_en
+            parent_slug = topic.parent.slug if topic.parent else None
+            out.append({**n, 'label': label, 'parent': parent_slug})
+    return out
 
 
 @app.get("/topics/article/{article_id}")
-def get_article_topics(article_id: str):
+def get_article_topics(article_id: str, include_labels: bool = False, include_raw: bool = False):
     from topic_extraction.models import ArticleTopic
-    record = ArticleTopic.objects.filter(article_id=article_id).first()
+    record = (
+        ArticleTopic.objects
+        .filter(article_id=article_id)
+        .order_by('-computed_at')
+        .first()
+    )
     if record is None:
-        raise HTTPException(status_code=404, detail="Not found.")
-    return {
-        "article_id": record.article_id,
-        "platform": record.platform,
-        "language": record.language,
-        "raw_topics": record.raw_topics,
-        "normalized": record.normalized,
-        "backend": record.backend,
-        "computed_at": record.computed_at.isoformat(),
+        raise HTTPException(status_code=404, detail='Not found.')
+    body = {
+        'id': str(record.id),
+        'article_id': record.article_id,
+        'platform': record.platform,
+        'language': record.language,
+        'normalized': _serialize_normalized_fastapi(record.normalized, include_labels, record.language),
+        'backend': record.backend,
+        'computed_at': record.computed_at.isoformat(),
+        'taxonomy_version': record.taxonomy_version,
     }
+    if record.language_source:
+        body['language_source'] = record.language_source
+    if include_raw:
+        body['raw_topics'] = record.raw_topics
+    return body
+
+
+@app.get("/topics")
+def topics_listing(
+    response: Response,
+    language: str | None = None,
+    if_none_match: str | None = Header(default=None),
+):
+    from django.conf import settings
+    from topic_extraction.taxonomy import get_topics_for_listing
+    from topic_extraction.taxonomy_data import TAXONOMY_VERSION
+
+    lang = language or settings.DEFAULT_LANGUAGE
+    if lang not in settings.TOPIC_LANGUAGES:
+        raise HTTPException(status_code=400, detail=f'Unsupported language: {lang!r}')
+
+    etag = f'"{TAXONOMY_VERSION}-{lang}"'
+    if if_none_match == etag:
+        return Response(status_code=304, headers={'ETag': etag})
+
+    data = get_topics_for_listing(lang)
+    body = {'version': TAXONOMY_VERSION, 'language': lang, **data}
+    response.headers['ETag'] = etag
+    response.headers['Cache-Control'] = 'public, max-age=300'
+    return body
