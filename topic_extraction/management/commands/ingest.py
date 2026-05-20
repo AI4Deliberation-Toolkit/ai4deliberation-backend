@@ -5,6 +5,7 @@ from topic_extraction import pipeline
 
 INGESTOR_REGISTRY = {
     'ypepth': ('topic_extraction.ingestors.xls', 'XLSIngestor'),
+    'opengov': ('topic_extraction.ingestors.opengov', 'OpengovIngestor'),
 }
 
 
