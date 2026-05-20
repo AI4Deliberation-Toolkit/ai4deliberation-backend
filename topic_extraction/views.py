@@ -1,8 +1,11 @@
+from django.conf import settings
 from rest_framework import views, status
 from rest_framework.response import Response
 
 from topic_extraction import pipeline
 from topic_extraction.models import ArticleTopic, Topic
+from topic_extraction.taxonomy import get_topics_for_listing
+from topic_extraction.taxonomy_data import TAXONOMY_VERSION
 
 REQUIRED_FIELDS = ('article_id', 'platform', 'article')
 
@@ -83,3 +86,31 @@ class ArticleTopicView(views.APIView):
             'backend': record.backend,
             'computed_at': record.computed_at.isoformat(),
         })
+
+
+class TopicsListingView(views.APIView):
+    def get(self, request):
+        language = request.query_params.get('language') or settings.DEFAULT_LANGUAGE
+        if language not in settings.TOPIC_LANGUAGES:
+            return Response(
+                {'error': f'Unsupported language: {language!r}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        etag = f'"{TAXONOMY_VERSION}-{language}"'
+        if_none_match = request.headers.get('If-None-Match')
+        if if_none_match == etag:
+            response = Response(status=status.HTTP_304_NOT_MODIFIED)
+            response['ETag'] = etag
+            return response
+
+        data = get_topics_for_listing(language)
+        payload = {
+            'version': TAXONOMY_VERSION,
+            'language': language,
+            **data,
+        }
+        response = Response(payload)
+        response['ETag'] = etag
+        response['Cache-Control'] = 'public, max-age=300'
+        return response

@@ -118,3 +118,37 @@ class ArticleTopicViewTest(TestCase):
     def test_get_nonexistent_returns_404(self):
         response = self.client.get('/api/topics/article/does-not-exist')
         self.assertEqual(response.status_code, 404)
+
+
+class TopicsListingViewTest(TestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+
+    def test_get_topics_returns_parents_leaves_hierarchy(self):
+        response = self.client.get('/api/topics?language=en')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertIn('parents', data)
+        self.assertIn('leaves', data)
+        self.assertIn('hierarchy', data)
+        self.assertIn('version', data)
+        self.assertIn('language', data)
+
+    def test_get_topics_returns_etag(self):
+        response = self.client.get('/api/topics?language=en')
+        self.assertIn('ETag', response.headers)
+
+    def test_if_none_match_returns_304(self):
+        first = self.client.get('/api/topics?language=en')
+        etag = first.headers['ETag']
+        second = self.client.get('/api/topics?language=en', HTTP_IF_NONE_MATCH=etag)
+        self.assertEqual(second.status_code, 304)
+
+    def test_unsupported_language_returns_400(self):
+        response = self.client.get('/api/topics?language=fr')
+        self.assertEqual(response.status_code, 400)
+
+    def test_omitted_language_uses_default(self):
+        response = self.client.get('/api/topics')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['language'], 'en')
