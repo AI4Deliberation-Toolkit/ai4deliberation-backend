@@ -90,6 +90,25 @@ class RecomputeTopicsTest(TestCase):
         self.assertNotEqual(new_row.taxonomy_version, '2026-01-01-1')
 
     @patch('topic_extraction.management.commands.recompute_topics.normalize')
+    def test_normalized_payload_preserves_raw_score(self, mock_normalize):
+        # Setup: create an ArticleTopic with normalized carrying raw_score.
+        from topic_extraction.normalizer import NormalizedTopic
+        mock_normalize.return_value = [
+            NormalizedTopic(topic_id='education_policy', score=0.85)
+        ]
+        ArticleTopic.objects.create(
+            article_id='rs1', platform='p1', language='en',
+            raw_topics=[{'label': 'Education Policy', 'score': 0.9}],
+            normalized=[{'topic_id': 'education_policy', 'score': 0.9, 'raw_score': 0.42}],
+            backend='embedding_similarity', taxonomy_version='2026-01-01-1',
+        )
+        call_command('recompute_topics')
+        new_row = ArticleTopic.objects.filter(article_id='rs1').order_by('-computed_at').first()
+        self.assertEqual(len(new_row.normalized), 1)
+        self.assertAlmostEqual(new_row.normalized[0]['raw_score'], 0.42)
+        self.assertEqual(new_row.normalized[0]['topic_id'], 'education_policy')
+
+    @patch('topic_extraction.management.commands.recompute_topics.normalize')
     def test_failed_row_does_not_abort_loop(self, mock_normalize):
         # Per-row isolation: if normalize() throws on one row, the loop continues
         # and the failure is logged. The summary should report `failed: 1`.

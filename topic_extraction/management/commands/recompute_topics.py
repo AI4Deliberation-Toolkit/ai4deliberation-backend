@@ -70,13 +70,30 @@ class Command(BaseCommand):
                 # carrying the stored value preserves the "re-normalize, not re-extract"
                 # contract. Below-threshold results still write a row with normalized=[]
                 # so operators can see the row was reconsidered.
+                # Build a topic_id → raw_score map from the source row, so re-normalization
+                # preserves the per-article z-score signal that fresh extractions write.
+                # Re-normalization can't recompute raw_score because the article-level
+                # statistics depend on the full embedding output (not stored).
+                old_raw_scores = {
+                    n.get('topic_id'): n.get('raw_score')
+                    for n in (record.normalized or [])
+                }
+                normalized_payload = [
+                    {
+                        'topic_id': n.topic_id,
+                        'score': n.score,
+                        'raw_score': old_raw_scores.get(n.topic_id),
+                    }
+                    for n in normalized
+                ]
+
                 ArticleTopic.objects.create(
                     article_id=record.article_id,
                     platform=record.platform,
                     language=record.language,
                     language_source=record.language_source,
                     raw_topics=record.raw_topics,
-                    normalized=[{'topic_id': n.topic_id, 'score': n.score} for n in normalized],
+                    normalized=normalized_payload,
                     backend=record.backend,
                     taxonomy_version=TAXONOMY_VERSION,
                 )

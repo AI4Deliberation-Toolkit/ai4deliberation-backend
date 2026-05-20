@@ -69,12 +69,41 @@ class Command(BaseCommand):
                     topic.save(update_fields=['label_en', 'labels', 'parent'])
                     updated += 1
 
-            # Pass 3: deactivate slugs no longer in code.
-            stale = Topic.objects.exclude(slug__in=code_slugs).filter(is_active=True)
-            deactivated = stale.update(is_active=False)
+            # Pass 3a: soft-deactivate stale LEAVES (existing semantics, scoped to leaves only).
+            # Leaves are identified by parent__isnull=False; runtime curation via admin
+            # is supported per D9 so deletion is not appropriate.
+            stale_leaves = Topic.objects.exclude(slug__in=code_slugs).filter(
+                parent__isnull=False, is_active=True
+            )
+            deactivated = stale_leaves.update(is_active=False)
+
+            # Pass 3b: hard-delete stale PARENTS after active-leaf-reference check (D10).
+            # Parents are pure aggregation nodes — they should not linger as soft-deactivated
+            # rows pointing-at by other rows. Topic.parent uses on_delete=SET_NULL, so any
+            # inactive leaf still referencing the parent gets its FK cleared on delete; the
+            # orphan-check below catches the only state that would be unsafe: an ACTIVE leaf
+            # in the DB still pointing at a parent that's being removed from code. By
+            # this point Pass 3a has already deactivated stale leaves, so the check is
+            # defensive against an inconsistent DB state (e.g., admin manually toggled
+            # is_active back on a leaf), not the normal seed flow.
+            stale_parents = Topic.objects.exclude(slug__in=code_slugs).filter(parent__isnull=True)
+            deleted_parents = 0
+            for stale_parent in stale_parents:
+                active_refs = list(
+                    Topic.objects.filter(parent=stale_parent, is_active=True)
+                    .values_list('slug', flat=True)
+                )
+                if active_refs:
+                    raise CommandError(
+                        f'Cannot remove parent {stale_parent.slug!r}: '
+                        f'active leaves still reference it: {active_refs}. '
+                        f'Update taxonomy_data.py to remove or reparent these leaves first.'
+                    )
+                stale_parent.delete()
+                deleted_parents += 1
 
         invalidate_taxonomy_cache()
 
         self.stdout.write(self.style.SUCCESS(
-            f'Done. Created: {created}, updated: {updated}, deactivated: {deactivated}'
+            f'Done. Created: {created}, updated: {updated}, deactivated: {deactivated}, deleted: {deleted_parents}'
         ))
