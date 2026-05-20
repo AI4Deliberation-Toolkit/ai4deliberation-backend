@@ -5,12 +5,12 @@ stages:
 
 validate-taxonomy:
   stage: validate
-  image: python:3.11
+  image: python:3.12-slim
   services:
     - name: postgres:17.6
       alias: db
   variables:
-    POSTGRES_NAME: ci_db
+    POSTGRES_DB: postgres
     POSTGRES_USER: ci
     POSTGRES_PASSWORD: ci
     POSTGRES_HOST: db
@@ -18,8 +18,7 @@ validate-taxonomy:
     SECRET_KEY: ci-only-not-secret-do-not-use-in-prod
     DJANGO_SETTINGS_MODULE: ai4deliberation_backend.settings.staging
   before_script:
-    - pip install pipenv
-    - pipenv install --deploy --system
+    - pip install --no-cache-dir -r requirements.txt
   script:
     - python manage.py migrate --noinput
     - python manage.py seed_taxonomy
@@ -31,7 +30,8 @@ bump-guard:
   variables:
     GIT_DEPTH: 0
   before_script:
-    - apk add --no-cache git grep
+    - apk add --no-cache git
+    - git fetch origin main:refs/remotes/origin/main
   script:
     - |
       if git diff --name-only origin/main HEAD | grep -q '^topic_extraction/taxonomy_data\.py$'; then
