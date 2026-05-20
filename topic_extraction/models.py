@@ -15,6 +15,15 @@ class Topic(models.Model):
     def __str__(self):
         return self.slug
 
+    def clean(self):
+        super().clean()
+        if self.parent_id is None and not self.is_active:
+            from django.core.exceptions import ValidationError
+            raise ValidationError(
+                'Parents (topics with no parent of their own) may not be deactivated. '
+                'Remove the parent from taxonomy_data.PARENTS to retire it.'
+            )
+
 
 class ArticleTopic(models.Model):
     BACKEND_LLM = 'llm'
