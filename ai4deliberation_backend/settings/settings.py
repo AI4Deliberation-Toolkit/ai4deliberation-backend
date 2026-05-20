@@ -134,10 +134,11 @@ HUGGING_TOKEN = config('HUGGING_TOKEN')
 
 # Topic extraction settings
 EXTRACTION_BACKEND = config('EXTRACTION_BACKEND', default='embedding')
-EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='intfloat/multilingual-e5-base')
+EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
 ZERO_SHOT_MODEL_NAME = config('ZERO_SHOT_MODEL_NAME', default='MoritzLaurer/mDeBERTa-v3-base-mnli-xnli')
 LLM_MODEL_NAME = config('LLM_MODEL_NAME', default='Qwen/Qwen2.5-3B-Instruct')
 EMBEDDING_THRESHOLD = float(config('EMBEDDING_THRESHOLD', default='0.35'))
+EMBEDDING_Z_THRESHOLD = float(config('EMBEDDING_Z_THRESHOLD', default='1.0'))
 
 # Topic extraction — language coverage
 TOPIC_LANGUAGES = ['en', 'el', 'de']
