@@ -11,6 +11,7 @@ from topic_extraction.taxonomy import get_embedding_model, get_taxonomy_embeddin
 class NormalizedTopic:
     topic_id: str  # Topic.slug
     score: float
+    raw_score: float | None = None
 
 
 def normalize(
@@ -50,6 +51,10 @@ def normalize(
         if best_score >= threshold:
             slug = topics[best_idx].slug
             if slug not in best or best[slug].score < raw_topic.score:
-                best[slug] = NormalizedTopic(topic_id=slug, score=round(raw_topic.score, 4))
+                best[slug] = NormalizedTopic(
+                    topic_id=slug,
+                    score=round(raw_topic.score, 4),
+                    raw_score=raw_topic.raw_score,
+                )
 
     return sorted(best.values(), key=lambda x: x.score, reverse=True)

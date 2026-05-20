@@ -5,6 +5,80 @@ from topic_extraction import pipeline, taxonomy_data
 from topic_extraction.extractors.base import TopicResult
 from topic_extraction.normalizer import NormalizedTopic
 from topic_extraction.models import ArticleTopic, Topic
+from topic_extraction.taxonomy_data import TAXONOMY_VERSION
+
+
+class PipelineExtractTest(TestCase):
+    def setUp(self):
+        Topic.objects.create(slug='education_policy', label_en='Education Policy', labels={})
+
+    @patch('topic_extraction.pipeline.normalize')
+    @patch('topic_extraction.pipeline._get_extractor')
+    @patch('topic_extraction.pipeline.detect_language')
+    def test_returns_payload_without_persisting(
+        self, mock_detect, mock_get_extractor, mock_normalize
+    ):
+        mock_detect.return_value = ('el', 'detected')
+        mock_extractor = MagicMock()
+        mock_extractor.extract.return_value = [TopicResult(label='Foo', score=0.9)]
+        mock_get_extractor.return_value = mock_extractor
+        mock_normalize.return_value = [NormalizedTopic(topic_id='education_policy', score=0.9)]
+
+        before_count = ArticleTopic.objects.count()
+        payload = pipeline.extract('art-x', 'opengov', 'text', [])
+        after_count = ArticleTopic.objects.count()
+
+        self.assertEqual(before_count, after_count)
+        self.assertEqual(payload['article_id'], 'art-x')
+        self.assertEqual(payload['platform'], 'opengov')
+        self.assertEqual(payload['language'], 'el')
+        self.assertEqual(payload['raw_topics'][0]['label'], 'Foo')
+        self.assertEqual(payload['normalized'][0]['topic_id'], 'education_policy')
+        self.assertEqual(payload['taxonomy_version'], TAXONOMY_VERSION)
+
+    @patch('topic_extraction.pipeline.normalize')
+    @patch('topic_extraction.pipeline.detect_language')
+    def test_backend_override_selects_similarity_extractor(self, mock_detect, mock_normalize):
+        # Verifies pipeline.extract(backend='embedding_similarity') routes to
+        # EmbeddingSimilarityExtractor and records the backend in the payload.
+        mock_detect.return_value = ('el', 'detected')
+        mock_normalize.return_value = []
+        with patch('topic_extraction.extractors.embedding.EmbeddingSimilarityExtractor') as mock_cls:
+            mock_instance = MagicMock()
+            mock_instance.extract.return_value = []
+            mock_cls.return_value = mock_instance
+
+            payload = pipeline.extract(
+                'art-z', 'opengov', 'text', [],
+                backend='embedding_similarity',
+            )
+
+        mock_cls.assert_called_once()
+        mock_instance.extract.assert_called_once()
+        self.assertEqual(payload['backend'], 'embedding_similarity')
+
+    @patch('topic_extraction.pipeline.normalize')
+    @patch('topic_extraction.pipeline._get_extractor')
+    @patch('topic_extraction.pipeline.detect_language')
+    def test_extract_fallback_to_embedding_on_failure(
+        self, mock_detect, mock_get_extractor, mock_normalize
+    ):
+        mock_detect.return_value = ('el', 'detected')
+        mock_llm = MagicMock()
+        mock_llm.extract.side_effect = ValueError('LLM parse error')
+        mock_get_extractor.return_value = mock_llm
+        mock_normalize.return_value = []
+
+        with patch('topic_extraction.extractors.embedding.EmbeddingExtractor') as mock_emb_cls:
+            mock_emb = MagicMock()
+            mock_emb.extract.return_value = []
+            mock_emb_cls.return_value = mock_emb
+            payload = pipeline.extract('art-y', 'opengov', 'text', [])
+
+        self.assertEqual(payload['backend'], 'embedding')
+
+
+
 
 
 class PipelineRunTest(TestCase):

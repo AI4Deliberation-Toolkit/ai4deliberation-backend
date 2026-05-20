@@ -6,6 +6,7 @@ from dataclasses import dataclass
 class TopicResult:
     label: str
     score: float
+    raw_score: float | None = None
 
 
 class BaseExtractor(ABC):

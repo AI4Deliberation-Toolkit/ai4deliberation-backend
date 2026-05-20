@@ -5,7 +5,7 @@ from django.test import TestCase
 from topic_extraction.extractors.base import BaseExtractor, TopicResult
 from topic_extraction.models import Topic
 from topic_extraction.taxonomy import invalidate_taxonomy_cache
-from topic_extraction.extractors.embedding import EmbeddingExtractor
+from topic_extraction.extractors.embedding import EmbeddingExtractor, EmbeddingSimilarityExtractor
 from topic_extraction.extractors.llm import LLMExtractor
 
 
@@ -96,6 +96,135 @@ class EmbeddingExtractorTest(TestCase):
         )
         # With embedding ~0.5 and zero-shot ~0.1, avg ~0.3 < threshold 0.35
         self.assertIsInstance(results, list)
+
+
+class EmbeddingSimilarityExtractorTest(TestCase):
+    def setUp(self):
+        Topic.objects.create(slug='education_policy', label_en='Education Policy',
+                             labels={'el': 'Εκπαιδευτική Πολιτική'})
+        Topic.objects.create(slug='climate_change', label_en='Climate Change',
+                             labels={'el': 'Κλιματική Αλλαγή'})
+        invalidate_taxonomy_cache()
+
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    @patch('topic_extraction.extractors.embedding.get_taxonomy_embeddings')
+    @patch('topic_extraction.extractors.embedding.get_embedding_model')
+    def test_returns_results_from_similarity_alone(
+        self, mock_emb_model_fn, mock_taxonomy_fn, mock_hf_pipeline
+    ):
+        topics = list(Topic.objects.all())
+        taxonomy_embs = np.array([[1.0, 0.0], [0.0, 1.0]])
+        mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
+
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([[0.95, 0.05]])
+        mock_emb_model_fn.return_value = mock_model
+
+        extractor = EmbeddingSimilarityExtractor()
+        results = extractor.extract(
+            article='Teachers face hiring challenges.', comments=[], language='en'
+        )
+
+        labels = [r.label for r in results]
+        self.assertIn('Education Policy', labels)
+        # Critical: zero-shot pipeline is never invoked by the similarity-only extractor.
+        mock_hf_pipeline.assert_not_called()
+
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    @patch('topic_extraction.extractors.embedding.get_taxonomy_embeddings')
+    @patch('topic_extraction.extractors.embedding.get_embedding_model')
+    def test_filters_below_threshold(
+        self, mock_emb_model_fn, mock_taxonomy_fn, mock_hf_pipeline
+    ):
+        topics = list(Topic.objects.all())
+        # Passage embedding orthogonal to both taxonomy axes → cos sim = 0.
+        taxonomy_embs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
+
+        mock_model = MagicMock()
+        mock_model.encode.return_value = np.array([[0.0, 0.0, 1.0]])
+        mock_emb_model_fn.return_value = mock_model
+
+        extractor = EmbeddingSimilarityExtractor()
+        results = extractor.extract(article='unrelated', comments=[], language='en')
+
+        self.assertEqual(results, [])
+        mock_hf_pipeline.assert_not_called()
+
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    @patch('topic_extraction.extractors.embedding.get_taxonomy_embeddings')
+    @patch('topic_extraction.extractors.embedding.get_embedding_model')
+    def test_results_carry_both_raw_cosine_and_z_score(
+        self, mock_emb_model_fn, mock_taxonomy_fn, mock_hf_pipeline
+    ):
+        # Three topics with one clear winner — verifies z-score normalisation
+        # picks the distinctive leaf and that both raw and z-score are exposed.
+        Topic.objects.create(slug='education_funding', label_en='Education Funding',
+                             labels={'el': 'Χρηματοδότηση Εκπαίδευσης'})
+        topics = list(Topic.objects.all())
+        invalidate_taxonomy_cache()
+
+        # Three taxonomy axes; passage close to axis 0, mid-distant from 1+2.
+        taxonomy_embs = np.array([
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+            [0.0, 0.0, 1.0],
+        ])
+        mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
+
+        mock_model = MagicMock()
+        # passage = [0.95, 0.30, 0.05] (close to axis 0, weak signal on the others)
+        mock_model.encode.return_value = np.array([[0.95, 0.30, 0.05]])
+        mock_emb_model_fn.return_value = mock_model
+
+        extractor = EmbeddingSimilarityExtractor()
+        results = extractor.extract(
+            article='Teachers face hiring challenges.', comments=[], language='en'
+        )
+
+        # At least one result, sorted by z-score descending — the strongest match wins.
+        self.assertGreater(len(results), 0)
+        # Each TopicResult exposes both the raw cosine (raw_score) and the z-score (score).
+        for r in results:
+            self.assertIsNotNone(r.raw_score, f'raw_score missing on {r.label}')
+            self.assertIsInstance(r.raw_score, float)
+            self.assertIsInstance(r.score, float)
+            # raw_score is in cosine space [-1, 1]; z-score is normalised, can be any real.
+            self.assertGreaterEqual(r.raw_score, -1.0)
+            self.assertLessEqual(r.raw_score, 1.0)
+        # The top result should have a higher z-score than any other, and its raw_score
+        # should be the maximum raw cosine seen (axis 0).
+        top = results[0]
+        self.assertEqual(top.score, max(r.score for r in results))
+        # The top z-score should be positive (above the article's mean).
+        self.assertGreater(top.score, 0)
+        mock_hf_pipeline.assert_not_called()
+
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    @patch('topic_extraction.extractors.embedding.get_taxonomy_embeddings')
+    @patch('topic_extraction.extractors.embedding.get_embedding_model')
+    def test_z_score_threshold_drops_flat_distributions(
+        self, mock_emb_model_fn, mock_taxonomy_fn, mock_hf_pipeline
+    ):
+        # When all leaves score within < 1σ of the article's own mean (a "flat"
+        # distribution), z-score filtering returns zero results — this is the
+        # zero-match signal we want.
+        topics = list(Topic.objects.all())
+        # Passage embedding equidistant from both taxonomy axes → identical cos sims.
+        taxonomy_embs = np.array([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]])
+        mock_taxonomy_fn.return_value = (topics, taxonomy_embs)
+
+        mock_model = MagicMock()
+        # equal projection onto both axes → both raw_scores are identical → stdev=0 → z=0.
+        mock_model.encode.return_value = np.array([[1.0, 1.0, 0.0]])
+        mock_emb_model_fn.return_value = mock_model
+
+        extractor = EmbeddingSimilarityExtractor()
+        results = extractor.extract(article='ambiguous text', comments=[], language='en')
+
+        # All leaves at z=0 are below the default z-threshold (>= 1.0) — zero match.
+        self.assertEqual(results, [])
+        mock_hf_pipeline.assert_not_called()
 
 
 class LLMExtractorTest(TestCase):
