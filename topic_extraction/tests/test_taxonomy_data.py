@@ -51,3 +51,15 @@ class TaxonomyStructureTest(TestCase):
                           f"Leaf {leaf['slug']!r} is missing labels['el']")
             self.assertTrue(leaf['labels']['el'],
                             f"Leaf {leaf['slug']!r} has an empty labels['el']")
+
+    def test_every_entry_has_german_label(self):
+        for p in taxonomy_data.PARENTS:
+            self.assertIn('de', p['labels'],
+                          f"Parent {p['slug']!r} is missing labels['de']")
+            self.assertTrue(p['labels']['de'].strip(),
+                            f"Parent {p['slug']!r} has an empty labels['de']")
+        for leaf in taxonomy_data.LEAVES:
+            self.assertIn('de', leaf['labels'],
+                          f"Leaf {leaf['slug']!r} is missing labels['de']")
+            self.assertTrue(leaf['labels']['de'].strip(),
+                            f"Leaf {leaf['slug']!r} has an empty labels['de']")
