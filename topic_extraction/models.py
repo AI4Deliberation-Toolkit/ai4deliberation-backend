@@ -15,6 +15,7 @@ class Topic(models.Model):
     def __str__(self):
         return self.slug
 
+    # Admin-form-only guard: bypassed by .update() and raw SQL. Not a DB constraint.
     def clean(self):
         super().clean()
         if self.parent_id is None and not self.is_active:

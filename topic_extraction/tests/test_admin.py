@@ -20,6 +20,16 @@ class TopicAdminTest(TestCase):
         admin_cls = site._registry[Topic]
         self.assertIn('labels', admin_cls.readonly_fields)
 
+    def test_slug_is_readonly(self):
+        admin_cls = site._registry[Topic]
+        self.assertIn('slug', admin_cls.readonly_fields)
+
+    def test_topic_admin_blocks_delete(self):
+        admin_cls = site._registry[Topic]
+        # has_delete_permission must return False regardless of object or request
+        self.assertFalse(admin_cls.has_delete_permission(None))
+        self.assertFalse(admin_cls.has_delete_permission(None, obj=Topic.objects.first()))
+
 
 class TopicParentDeactivationGuardTest(TestCase):
     def setUp(self):
@@ -30,3 +40,17 @@ class TopicParentDeactivationGuardTest(TestCase):
         parent.is_active = False
         with self.assertRaises(ValidationError):
             parent.full_clean()
+
+
+class ArticleTopicAdminTest(TestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+
+    def test_admin_is_registered(self):
+        from topic_extraction.models import ArticleTopic
+        self.assertIn(ArticleTopic, site._registry)
+
+    def test_article_topic_admin_blocks_delete(self):
+        from topic_extraction.models import ArticleTopic
+        admin_cls = site._registry[ArticleTopic]
+        self.assertFalse(admin_cls.has_delete_permission(None))
