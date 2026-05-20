@@ -99,23 +99,61 @@ class ExtractConversationViewTest(TestCase):
 
 class ArticleTopicViewTest(TestCase):
     def setUp(self):
+        call_command('seed_taxonomy')
+        # Older row
         ArticleTopic.objects.create(
-            article_id='art-42',
-            platform='ypepth',
-            language='el',
-            raw_topics=[{'label': 'test', 'score': 0.8}],
-            normalized=[{'topic_id': 'education_policy', 'score': 0.8}],
-            backend='embedding',
+            article_id='art-42', platform='ypepth', language='el',
+            language_source='detected',
+            raw_topics=[{'label': 'old', 'score': 0.5}],
+            normalized=[{'topic_id': 'education_policy', 'score': 0.5}],
+            backend='embedding', taxonomy_version='2026-05-14-1',
+        )
+        # Newer row
+        ArticleTopic.objects.create(
+            article_id='art-42', platform='ypepth', language='el',
+            language_source='detected',
+            raw_topics=[{'label': 'new', 'score': 0.9}],
+            normalized=[{'topic_id': 'education_policy', 'score': 0.9}],
+            backend='embedding', taxonomy_version='2026-05-15-1',
         )
 
     def test_get_returns_latest_record(self):
         response = self.client.get('/api/topics/article/art-42')
         self.assertEqual(response.status_code, 200)
         data = response.json()
-        self.assertEqual(data['article_id'], 'art-42')
-        self.assertEqual(data['language'], 'el')
+        # Latest row should have score 0.9 in normalized
+        self.assertEqual(data['normalized'][0]['score'], 0.9)
+        self.assertEqual(data['taxonomy_version'], '2026-05-15-1')
 
-    def test_get_nonexistent_returns_404(self):
+    def test_default_response_omits_raw_topics(self):
+        response = self.client.get('/api/topics/article/art-42')
+        self.assertNotIn('raw_topics', response.json())
+
+    def test_include_raw_returns_raw_topics(self):
+        response = self.client.get('/api/topics/article/art-42?include_raw=true')
+        self.assertIn('raw_topics', response.json())
+
+    def test_include_labels_adds_label_and_parent(self):
+        response = self.client.get('/api/topics/article/art-42?include_labels=true')
+        first = response.json()['normalized'][0]
+        self.assertIn('label', first)
+        self.assertIn('parent', first)
+
+    def test_deactivated_slug_gets_null_label(self):
+        # Deactivate the leaf and re-query with labels
+        leaf = Topic.objects.get(slug='education_policy')
+        leaf.is_active = False
+        leaf.save()
+        response = self.client.get('/api/topics/article/art-42?include_labels=true')
+        first = response.json()['normalized'][0]
+        self.assertIsNone(first['label'])
+        self.assertIsNone(first['parent'])
+
+    def test_response_includes_id(self):
+        response = self.client.get('/api/topics/article/art-42')
+        self.assertIn('id', response.json())
+
+    def test_nonexistent_returns_404(self):
         response = self.client.get('/api/topics/article/does-not-exist')
         self.assertEqual(response.status_code, 404)
 

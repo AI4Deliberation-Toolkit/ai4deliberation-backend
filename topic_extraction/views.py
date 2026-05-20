@@ -74,18 +74,34 @@ class ExtractConversationView(views.APIView):
 
 class ArticleTopicView(views.APIView):
     def get(self, request, article_id):
-        record = ArticleTopic.objects.filter(article_id=article_id).first()
+        record = (
+            ArticleTopic.objects
+            .filter(article_id=article_id)
+            .order_by('-computed_at')
+            .first()
+        )
         if record is None:
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        return Response({
+
+        include_labels = request.query_params.get('include_labels') == 'true'
+        include_raw = request.query_params.get('include_raw') == 'true'
+
+        payload = {
+            'id': str(record.id),
             'article_id': record.article_id,
             'platform': record.platform,
             'language': record.language,
-            'raw_topics': record.raw_topics,
-            'normalized': record.normalized,
+            'normalized': _serialize_normalized(record.normalized, include_labels, record.language),
             'backend': record.backend,
             'computed_at': record.computed_at.isoformat(),
-        })
+            'taxonomy_version': record.taxonomy_version,
+        }
+        if record.language_source:
+            payload['language_source'] = record.language_source
+        if include_raw:
+            payload['raw_topics'] = record.raw_topics
+
+        return Response(payload)
 
 
 class TopicsListingView(views.APIView):
