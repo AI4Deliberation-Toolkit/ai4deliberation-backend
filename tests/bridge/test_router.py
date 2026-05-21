@@ -36,11 +36,14 @@ def test_valid_request_returns_202(mock_pipeline):
 
 @patch("bridge.router.HMAC_SECRET", "test-secret")
 def test_invalid_hmac_returns_400():
+    form = _make_form()
+    tampered = dict(form["data"])
+    sig = tampered["hmac_signature"]
+    tampered["hmac_signature"] = sig[:-1] + ("0" if sig[-1] != "0" else "1")
     response = client.post(
         "/recordings/incoming",
-        data={"event_id": "ev-1", "breakout_id": "br-1",
-              "project_id": "proj-abc", "timestamp": "2026-04-19T10:00:00Z", "hmac_signature": "badsig"},
-        files={"file": ("rec.webm", b"content", "audio/webm")},
+        data=tampered,
+        files=form["files"],
     )
     assert response.status_code == 400
 
@@ -56,3 +59,4 @@ def test_background_task_is_dispatched(mock_pipeline):
     assert args[1] == "ev-1"           # event_id
     assert args[2] == "br-1"           # breakout_id
     assert args[3] == "proj-abc"       # project_id
+    assert args[4] == "2026-04-19T10:00:00Z"  # timestamp
