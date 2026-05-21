@@ -19,6 +19,7 @@ def test_signature_verifies_against_bridge():
         sig = compute_signature(
             event_id="ev-1",
             breakout_id="room-a",
+            project_id="proj-abc",
             timestamp="2026-05-11T10:00:00Z",
             file_path=file_path,
             secret=secret,
@@ -26,6 +27,7 @@ def test_signature_verifies_against_bridge():
         assert verify_hmac(
             event_id="ev-1",
             breakout_id="room-a",
+            project_id="proj-abc",
             timestamp="2026-05-11T10:00:00Z",
             file_path=file_path,
             signature=sig,
@@ -40,8 +42,8 @@ def test_signature_changes_when_file_changes():
     p1 = _write_temp_file(b"content one")
     p2 = _write_temp_file(b"content two")
     try:
-        s1 = compute_signature("ev-1", "room-a", "2026-05-11T10:00:00Z", p1, secret)
-        s2 = compute_signature("ev-1", "room-a", "2026-05-11T10:00:00Z", p2, secret)
+        s1 = compute_signature("ev-1", "room-a", "proj-abc", "2026-05-11T10:00:00Z", p1, secret)
+        s2 = compute_signature("ev-1", "room-a", "proj-abc", "2026-05-11T10:00:00Z", p2, secret)
         assert s1 != s2
     finally:
         p1.unlink()
@@ -51,8 +53,8 @@ def test_signature_changes_when_file_changes():
 def test_signature_changes_when_secret_changes():
     file_path = _write_temp_file(b"same content")
     try:
-        s1 = compute_signature("ev-1", "room-a", "2026-05-11T10:00:00Z", file_path, "secret-a")
-        s2 = compute_signature("ev-1", "room-a", "2026-05-11T10:00:00Z", file_path, "secret-b")
+        s1 = compute_signature("ev-1", "room-a", "proj-abc", "2026-05-11T10:00:00Z", file_path, "secret-a")
+        s2 = compute_signature("ev-1", "room-a", "proj-abc", "2026-05-11T10:00:00Z", file_path, "secret-b")
         assert s1 != s2
     finally:
         file_path.unlink()

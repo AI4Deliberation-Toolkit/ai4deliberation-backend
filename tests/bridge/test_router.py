@@ -15,13 +15,13 @@ client = TestClient(app)
 
 
 def _make_form(file_bytes=b"fake audio", event_id="ev-1", breakout_id="br-1",
-               timestamp="2026-04-19T10:00:00Z", secret="test-secret"):
+               project_id="proj-abc", timestamp="2026-04-19T10:00:00Z", secret="test-secret"):
     sha = hashlib.sha256(file_bytes).hexdigest()
-    canonical = f"{event_id}\n{breakout_id}\n{timestamp}\n{sha}"
+    canonical = f"{event_id}\n{breakout_id}\n{project_id}\n{timestamp}\n{sha}"
     sig = hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
     return {
         "data": {"event_id": event_id, "breakout_id": breakout_id,
-                 "timestamp": timestamp, "hmac_signature": sig},
+                 "project_id": project_id, "timestamp": timestamp, "hmac_signature": sig},
         "files": {"file": ("rec.webm", file_bytes, "audio/webm")},
     }
 
@@ -39,7 +39,7 @@ def test_invalid_hmac_returns_400():
     response = client.post(
         "/recordings/incoming",
         data={"event_id": "ev-1", "breakout_id": "br-1",
-              "timestamp": "2026-04-19T10:00:00Z", "hmac_signature": "badsig"},
+              "project_id": "proj-abc", "timestamp": "2026-04-19T10:00:00Z", "hmac_signature": "badsig"},
         files={"file": ("rec.webm", b"content", "audio/webm")},
     )
     assert response.status_code == 400
@@ -55,3 +55,4 @@ def test_background_task_is_dispatched(mock_pipeline):
     assert isinstance(args[0], Path)   # file_path
     assert args[1] == "ev-1"           # event_id
     assert args[2] == "br-1"           # breakout_id
+    assert args[3] == "proj-abc"       # project_id

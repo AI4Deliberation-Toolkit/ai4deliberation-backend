@@ -3,7 +3,6 @@ import tempfile
 from pathlib import Path
 
 from bridge.audio_processor import extract_audio, get_duration, inspect_file, split_into_chunks
-from bridge.config import get_project_id
 from bridge.dembrane_client import finish_conversation, initiate_conversation, upload_chunk
 
 
@@ -11,14 +10,14 @@ async def process_recording(
     file_path: Path,
     event_id: str,
     breakout_id: str,
+    project_id: str,
     timestamp: str,
 ) -> None:
     tmp_dir = file_path.parent
     print(f"[bridge] pipeline start event_id={event_id} breakout_id={breakout_id}", flush=True)
 
     try:
-        project_id = get_project_id(event_id)
-        print(f"[bridge] resolved project_id={project_id}", flush=True)
+        print(f"[bridge] target project_id={project_id}", flush=True)
 
         # [1] Inspect file — extract audio if video
         file_type = inspect_file(file_path)

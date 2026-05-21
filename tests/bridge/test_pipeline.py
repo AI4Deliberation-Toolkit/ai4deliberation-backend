@@ -14,7 +14,6 @@ def tmp_recording(tmp_path):
     return f
 
 
-@patch("bridge.pipeline.get_project_id", return_value="proj-1")
 @patch("bridge.pipeline.inspect_file", return_value="video")
 @patch("bridge.pipeline.extract_audio")
 @patch("bridge.pipeline.get_duration", return_value=120.0)
@@ -24,7 +23,7 @@ def tmp_recording(tmp_path):
 @patch("bridge.pipeline.finish_conversation", new_callable=AsyncMock)
 async def test_whole_video_file_happy_path(
     mock_finish, mock_upload, mock_initiate, mock_split,
-    mock_duration, mock_extract, mock_inspect, mock_project, tmp_path
+    mock_duration, mock_extract, mock_inspect, tmp_path
 ):
     rec = tmp_path / "rec.mp4"
     rec.write_bytes(b"fake video")
@@ -47,14 +46,13 @@ async def test_whole_video_file_happy_path(
     mock_extract.side_effect = fake_extract
     mock_split.side_effect = fake_split
 
-    await process_recording(rec, "ev-1", "br-1", "2026-04-19T10:00:00Z")
+    await process_recording(rec, "ev-1", "br-1", "proj-abc", "2026-04-19T10:00:00Z")
 
-    mock_initiate.assert_called_once_with("proj-1", "ev-1 / br-1")
+    mock_initiate.assert_called_once_with("proj-abc", "ev-1 / br-1")
     assert mock_upload.call_count == 2
     mock_finish.assert_called_once_with("conv-1")
 
 
-@patch("bridge.pipeline.get_project_id", return_value="proj-1")
 @patch("bridge.pipeline.inspect_file", return_value="audio")
 @patch("bridge.pipeline.get_duration", return_value=25.0)
 @patch("bridge.pipeline.initiate_conversation", new_callable=AsyncMock, return_value="conv-1")
@@ -62,12 +60,12 @@ async def test_whole_video_file_happy_path(
 @patch("bridge.pipeline.finish_conversation", new_callable=AsyncMock)
 async def test_single_audio_chunk_skips_split(
     mock_finish, mock_upload, mock_initiate,
-    mock_duration, mock_inspect, mock_project, tmp_path
+    mock_duration, mock_inspect, tmp_path
 ):
     rec = tmp_path / "rec.webm"
     rec.write_bytes(b"short audio")
 
-    await process_recording(rec, "ev-1", "br-1", "2026-04-19T10:00:00Z")
+    await process_recording(rec, "ev-1", "br-1", "proj-abc", "2026-04-19T10:00:00Z")
 
     mock_upload.assert_called_once()
     mock_finish.assert_called_once_with("conv-1")

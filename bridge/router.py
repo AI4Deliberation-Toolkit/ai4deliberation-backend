@@ -18,6 +18,7 @@ async def receive_recording(
     file: UploadFile = File(...),
     event_id: str = Form(...),
     breakout_id: str = Form(...),
+    project_id: str = Form(...),
     timestamp: str = Form(...),
     hmac_signature: str = Form(...),
 ) -> Response:
@@ -30,9 +31,9 @@ async def receive_recording(
         while chunk := await file.read(1024 * 1024):
             f.write(chunk)
 
-    if not verify_hmac(event_id, breakout_id, timestamp, file_path, hmac_signature, HMAC_SECRET):
+    if not verify_hmac(event_id, breakout_id, project_id, timestamp, file_path, hmac_signature, HMAC_SECRET):
         shutil.rmtree(tmp_dir)
         raise HTTPException(status_code=400, detail="Invalid HMAC signature")
 
-    background_tasks.add_task(process_recording, file_path, event_id, breakout_id, timestamp)
+    background_tasks.add_task(process_recording, file_path, event_id, breakout_id, project_id, timestamp)
     return Response(status_code=202)

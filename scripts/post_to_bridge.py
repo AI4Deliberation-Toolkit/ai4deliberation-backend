@@ -28,12 +28,13 @@ def _compute_file_sha256(file_path: Path) -> str:
 def compute_signature(
     event_id: str,
     breakout_id: str,
+    project_id: str,
     timestamp: str,
     file_path: Path,
     secret: str,
 ) -> str:
     file_sha256 = _compute_file_sha256(file_path)
-    canonical = f"{event_id}\n{breakout_id}\n{timestamp}\n{file_sha256}"
+    canonical = f"{event_id}\n{breakout_id}\n{project_id}\n{timestamp}\n{file_sha256}"
     return hmac.new(secret.encode(), canonical.encode(), hashlib.sha256).hexdigest()
 
 
@@ -48,6 +49,7 @@ def main() -> int:
     parser.add_argument("--file", required=True, type=Path, help="Path to MP4 (or audio) file.")
     parser.add_argument("--event-id", required=True, help="Frankly event identifier.")
     parser.add_argument("--breakout-id", required=True, help="Frankly breakout room identifier.")
+    parser.add_argument("--project-id", required=True, help="Dembrane project identifier.")
     parser.add_argument(
         "--timestamp",
         default=None,
@@ -73,12 +75,13 @@ def main() -> int:
 
     timestamp = args.timestamp or datetime.now(timezone.utc).isoformat()
 
-    sig = compute_signature(args.event_id, args.breakout_id, timestamp, args.file, secret)
+    sig = compute_signature(args.event_id, args.breakout_id, args.project_id, timestamp, args.file, secret)
     if args.bad_hmac:
         sig = _flip_last_hex_char(sig)
 
     print(f"[script] POST {bridge_url}/recordings/incoming")
     print(f"[script] event_id={args.event_id} breakout_id={args.breakout_id} timestamp={timestamp}")
+    print(f"[script] project_id={args.project_id}")
     print(f"[script] file={args.file} ({args.file.stat().st_size} bytes)")
     print(f"[script] hmac_signature={sig}{' (CORRUPTED)' if args.bad_hmac else ''}")
 
@@ -88,6 +91,7 @@ def main() -> int:
             data={
                 "event_id": args.event_id,
                 "breakout_id": args.breakout_id,
+                "project_id": args.project_id,
                 "timestamp": timestamp,
                 "hmac_signature": sig,
             },
