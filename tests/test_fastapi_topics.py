@@ -43,3 +43,46 @@ class FastAPITopicsParityTest(TransactionTestCase):
         self.assertIn('leaves', body)
         self.assertIn('hierarchy', body)
         self.assertIn('version', body)
+
+
+class FastAPIArticleSimilarityTest(TransactionTestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+        from topic_extraction.models import ArticleEmbedding
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='src', language='en',
+            vector=[1.0, 0.0], embedding_model_name='mpnet',
+        )
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='c1', language='en',
+            vector=[0.9, 0.1], embedding_model_name='mpnet',
+        )
+        self.client = TestClient(app)
+
+    def test_happy_path(self):
+        r = self.client.get('/articles/opengov/src/similar?k=10')
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body['platform'], 'opengov')
+        self.assertEqual(body['article_id'], 'src')
+        self.assertEqual(body['count'], 1)
+        self.assertEqual(body['results'][0]['article_id'], 'c1')
+
+    def test_missing_source_returns_404(self):
+        r = self.client.get('/articles/opengov/does-not-exist/similar')
+        self.assertEqual(r.status_code, 404)
+
+    def test_k_out_of_range_returns_400(self):
+        r = self.client.get('/articles/opengov/src/similar?k=0')
+        self.assertEqual(r.status_code, 400)
+
+    def test_unknown_topic_slug_returns_422(self):
+        # FastAPI convention: bad slug → 422 (Pydantic validation code).
+        r = self.client.get('/articles/opengov/src/similar?topic_slug=not-a-real-slug')
+        self.assertEqual(r.status_code, 422)
+
+    def test_recommend_endpoint_is_deprecated(self):
+        # The old /recommend endpoint should no longer be active — commented
+        # out in this task. Hitting it returns 404 (FastAPI route not found).
+        r = self.client.post('/recommend', json={'current_text': 'x', 'all_texts': ['y']})
+        self.assertEqual(r.status_code, 404)

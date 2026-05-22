@@ -386,21 +386,28 @@ def group_by_topic(documents, topic_ids):
 # Recommendation
 # ==================
 
-def recommend_related(
-    current_text: str,
-    all_texts: list[str],
-    top_k: int = 5,
-):
-    embeddings = embed_texts(all_texts)
-    query_emb = embed_texts([current_text])[0]
+# ----------------------------------------------------------------------
+# DEPRECATED 2026-05-22 by Phase 4 (article similarity rollout).
+# Use GET /articles/{platform}/{article_id}/similar instead, which uses
+# persistent embeddings rather than recomputing on every request.
+# Preserved for reference; no client was using this endpoint at deprecation.
+# ----------------------------------------------------------------------
 
-    scores = util.cos_sim(query_emb, embeddings)[0].numpy()
-    best_indices = np.argsort(scores)[::-1][1 : top_k + 1]
-
-    return [
-        {"text": all_texts[i], "score": float(scores[i])}
-        for i in best_indices
-    ]
+# def recommend_related(
+#     current_text: str,
+#     all_texts: list[str],
+#     top_k: int = 5,
+# ):
+#     embeddings = embed_texts(all_texts)
+#     query_emb = embed_texts([current_text])[0]
+#
+#     scores = util.cos_sim(query_emb, embeddings)[0].numpy()
+#     best_indices = np.argsort(scores)[::-1][1 : top_k + 1]
+#
+#     return [
+#         {"text": all_texts[i], "score": float(scores[i])}
+#         for i in best_indices
+#     ]
 
 
 # ======================================================
@@ -478,12 +485,12 @@ def extract(payload: list[str]):
     }
 
 
-@app.post("/recommend")
-def recommend(payload: dict):
-    return recommend_related(
-        payload["current_text"],
-        payload["all_texts"]
-    )
+# @app.post("/recommend")
+# def recommend(payload: dict):
+#     return recommend_related(
+#         payload["current_text"],
+#         payload["all_texts"]
+#     )
 
 
 @app.post("/topics/single/zero-shot", response_model=TopicsResponse)
@@ -599,3 +606,43 @@ def topics_listing(
     response.headers['ETag'] = etag
     response.headers['Cache-Control'] = 'public, max-age=300'
     return body
+
+
+@app.get("/articles/{platform}/{article_id}/similar")
+def get_similar_articles(
+    platform: str,
+    article_id: str,
+    k: int = 10,
+    topic_slug: str | None = None,
+):
+    if k <= 0 or k > 100:
+        raise HTTPException(status_code=400, detail='k must be between 1 and 100')
+
+    from topic_extraction.similarity import (
+        find_similar, SourceNotFoundError, UnknownTopicSlugError,
+    )
+    try:
+        results = find_similar(platform, article_id, k=k, topic_slug=topic_slug)
+    except SourceNotFoundError:
+        raise HTTPException(status_code=404, detail='Not found.')
+    except UnknownTopicSlugError as e:
+        raise HTTPException(
+            status_code=422,
+            detail=f'Unknown topic_slug: {e.args[0]!r}',
+        )
+
+    return {
+        'platform': platform,
+        'article_id': article_id,
+        'count': len(results),
+        'results': [
+            {
+                'platform': r.platform,
+                'article_id': r.article_id,
+                'language': r.language,
+                'raw_score': r.raw_score,
+                'z_score': r.z_score,
+            }
+            for r in results
+        ],
+    }
