@@ -322,3 +322,71 @@ class PipelineArticleEmbeddingIntegrationTest(TestCase):
         self.assertEqual(ae.id, first_ae_id)  # Same PK.
         self.assertEqual(ae.vector, [0.5, 0.6, 0.7])  # New vector.
 
+    @patch('topic_extraction.pipeline.detect_language')
+    @patch('topic_extraction.pipeline._get_extractor')
+    def test_fallback_path_writes_articleembedding(self, mock_get_extractor, mock_detect):
+        """The fallback path (when the chosen extractor raises) routes through
+        EmbeddingExtractor.extract_with_embedding, which produces an embedding.
+        This test asserts the fallback path writes an ArticleEmbedding row, not
+        just an ArticleTopic. Locks in the Phase-4 behavior change at df4bb92."""
+        from topic_extraction.models import ArticleEmbedding
+        from topic_extraction.extractors.base import TopicResult
+
+        mock_detect.return_value = ('en', 'detected')
+        # The chosen extractor raises.
+        mock_extractor = MagicMock()
+        mock_extractor.extract_with_embedding.side_effect = RuntimeError('boom')
+        mock_extractor.extract.side_effect = RuntimeError('boom')
+        mock_get_extractor.return_value = mock_extractor
+
+        # Patch the fallback EmbeddingExtractor to return a real vector.
+        with patch('topic_extraction.extractors.embedding.EmbeddingExtractor') as mock_fallback_cls:
+            mock_fallback = MagicMock()
+            mock_fallback.extract_with_embedding.return_value = (
+                [TopicResult(label='education', score=2.0, raw_score=0.85)],
+                np.array([0.4, 0.5, 0.6]),
+            )
+            mock_fallback_cls.return_value = mock_fallback
+
+            pipeline.run(
+                article_id='art-fallback',
+                platform='opengov',
+                article='text',
+                comments=[],
+            )
+
+        # ArticleEmbedding was written by the fallback path.
+        emb = ArticleEmbedding.objects.get(platform='opengov', article_id='art-fallback')
+        self.assertEqual(emb.vector, [0.4, 0.5, 0.6])
+
+    @patch('topic_extraction.pipeline.detect_language')
+    @patch('topic_extraction.pipeline._get_extractor')
+    def test_transactional_rollback_on_articleembedding_failure(self, mock_get_extractor, mock_detect):
+        """Symmetric to test_transactional_rollback_on_articletopic_failure:
+        if ArticleEmbedding.update_or_create fails, the ArticleTopic write
+        must also roll back. Locks in the bidirectional atomic contract."""
+        from topic_extraction.models import ArticleTopic, ArticleEmbedding
+        from topic_extraction.extractors.base import TopicResult
+        from unittest.mock import patch as up
+
+        mock_detect.return_value = ('en', 'detected')
+        mock_extractor = MagicMock()
+        mock_extractor.extract_with_embedding.return_value = (
+            [TopicResult(label='education', score=2.0, raw_score=0.85)],
+            np.array([0.1, 0.2, 0.3]),
+        )
+        mock_get_extractor.return_value = mock_extractor
+
+        with up.object(ArticleEmbedding.objects, 'update_or_create', side_effect=Exception('forced')):
+            with self.assertRaises(Exception):
+                pipeline.run(
+                    article_id='art-rollback-sym',
+                    platform='opengov',
+                    article='text',
+                    comments=[],
+                )
+
+        # Neither row persists (transaction rolled back).
+        self.assertEqual(ArticleTopic.objects.filter(article_id='art-rollback-sym').count(), 0)
+        self.assertEqual(ArticleEmbedding.objects.filter(article_id='art-rollback-sym').count(), 0)
+

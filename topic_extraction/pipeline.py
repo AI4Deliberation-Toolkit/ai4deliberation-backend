@@ -1,8 +1,9 @@
 from django.conf import settings
+from django.db import transaction
 
 from topic_extraction.extractors.base import BaseExtractor
 from topic_extraction.language import detect_language
-from topic_extraction.models import ArticleTopic
+from topic_extraction.models import ArticleTopic, ArticleEmbedding
 from topic_extraction.normalizer import normalize
 from topic_extraction.taxonomy_data import TAXONOMY_VERSION
 
@@ -57,7 +58,8 @@ def extract(
             raw_topics = extractor.extract(article, comments, language)
     except Exception:
         # Fallback path: EmbeddingExtractor (the slow zero-shot one) is the
-        # safety net. It always produces an embedding.
+        # safety net. Its extract_with_embedding produces a vector in the real
+        # implementation; tests may mock this to None for convenience.
         from topic_extraction.extractors.embedding import EmbeddingExtractor
         raw_topics, passage_emb = EmbeddingExtractor().extract_with_embedding(article, comments, language)
         effective_backend = 'embedding'
@@ -109,9 +111,6 @@ def run(
     Raises:
         ValueError: if explicit_language is not in settings.TOPIC_LANGUAGES.
     """
-    from django.db import transaction
-    from topic_extraction.models import ArticleEmbedding
-
     payload = extract(article_id, platform, article, comments, explicit_language, backend)
     # Pop the embedding field; ArticleTopic doesn't have a vector column.
     passage_embedding = payload.pop('passage_embedding', None)
@@ -123,7 +122,7 @@ def run(
                 platform=platform,
                 article_id=article_id,
                 defaults={
-                    'language': record.language,
+                    'language': payload['language'],
                     'vector': passage_embedding,
                     'embedding_model_name': settings.EMBEDDING_MODEL_NAME,
                 },
