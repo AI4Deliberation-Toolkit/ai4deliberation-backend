@@ -252,13 +252,39 @@ class ArticleSimilarityViewTest(TestCase):
         response = self.client.get('/api/articles/opengov/src/similar?topic_slug=not-a-real-slug')
         self.assertEqual(response.status_code, 400)
 
+    def test_empty_topic_slug_treated_as_no_filter(self):
+        """`?topic_slug=` (empty string) should be normalized to None and act
+        as if the filter wasn't passed. Tests the `or None` defensive code."""
+        response = self.client.get('/api/articles/opengov/src/similar?topic_slug=')
+        self.assertEqual(response.status_code, 200)
+        # Should return the same results as if no topic_slug was passed.
+        self.assertEqual(response.json()['count'], 2)
+
     def test_default_k_is_10(self):
         # No k param — should still return what's available (only 2 candidates here).
         response = self.client.get('/api/articles/opengov/src/similar')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['count'], 2)
 
-    def test_url_does_not_shadow_topics_article(self):
+    def test_empty_candidate_pool_returns_200_with_count_zero(self):
+        """Source exists but no candidates in its (platform, language) bucket.
+        Should return 200 with empty results, not 404."""
+        from topic_extraction.models import ArticleEmbedding
+        # Create a source in a fresh bucket with no other candidates.
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='lonely', language='de',
+            vector=[1.0, 0.0], embedding_model_name='mpnet',
+        )
+        response = self.client.get('/api/articles/opengov/lonely/similar')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['count'], 0)
+        self.assertEqual(data['results'], [])
+        # Source platform and article_id still echoed.
+        self.assertEqual(data['platform'], 'opengov')
+        self.assertEqual(data['article_id'], 'lonely')
+
+    def test_phase1_article_endpoint_still_works(self):
         # Sanity: /api/topics/article/<id> still works (Phase 1 endpoint).
         # This test catches any URL pattern collision.
         from topic_extraction.models import ArticleTopic

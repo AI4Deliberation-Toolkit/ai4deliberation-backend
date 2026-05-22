@@ -4,6 +4,7 @@ from rest_framework.response import Response
 
 from topic_extraction import pipeline
 from topic_extraction.models import ArticleTopic, Topic
+from topic_extraction.similarity import find_similar, SourceNotFoundError, UnknownTopicSlugError
 from topic_extraction.taxonomy import get_topics_for_listing
 from topic_extraction.taxonomy_data import TAXONOMY_VERSION
 
@@ -155,9 +156,6 @@ class ArticleSimilarityView(views.APIView):
 
         topic_slug = request.query_params.get('topic_slug') or None
 
-        from topic_extraction.similarity import (
-            find_similar, SourceNotFoundError, UnknownTopicSlugError,
-        )
         try:
             results = find_similar(platform, article_id, k=k, topic_slug=topic_slug)
         except SourceNotFoundError:
