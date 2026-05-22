@@ -169,3 +169,79 @@ class BackfillEndToEndParityTest(TestCase):
             np.array(live_vec),
             np.array(backfilled.vector),
         )
+
+
+class BackfillPlatformFilterTest(BackfillEmbeddingsBaseTest):
+    def test_platform_filter_excludes_non_matching_platform(self):
+        # Add an ArticleTopic for a different platform.
+        ArticleTopic.objects.create(
+            article_id='a1', platform='bridge', language='el',
+            language_source='detected',
+            raw_topics=[], normalized=[],
+            backend='embedding_similarity', taxonomy_version='test',
+        )
+        # Mock ingestor yields a1 on both opengov and bridge.
+        mock_ingestor_module = MagicMock()
+        mock_ingestor_module.iter_articles.return_value = iter([
+            {'platform': 'opengov', 'article_id': 'a1', 'article': 'text', 'comments': []},
+            {'platform': 'bridge', 'article_id': 'a1', 'article': 'other', 'comments': []},
+        ])
+
+        def fake_emb(article, comments, language):
+            return np.array([0.1, 0.2, 0.3])
+
+        with patch('topic_extraction.management.commands.backfill_embeddings._get_ingestor',
+                   return_value=mock_ingestor_module):
+            with patch('topic_extraction.management.commands.backfill_embeddings._compute_passage_embedding',
+                       side_effect=fake_emb):
+                call_command('backfill_embeddings', '--source', 'opengov', '--platform', 'opengov')
+
+        # Only the opengov article should have been embedded.
+        self.assertTrue(ArticleEmbedding.objects.filter(platform='opengov', article_id='a1').exists())
+        self.assertFalse(ArticleEmbedding.objects.filter(platform='bridge', article_id='a1').exists())
+
+
+class BackfillLanguageFilterTest(BackfillEmbeddingsBaseTest):
+    def test_language_filter_excludes_non_matching_language(self):
+        # Override a1's language to 'en' so we can test filtering by language.
+        ArticleTopic.objects.filter(article_id='a1').update(language='en')
+        # a2 stays 'el'. Running with --language el should only embed a2.
+        self._run_with_mocks('--source', 'opengov', '--language', 'el')
+        # a2 (el) was embedded; a1 (en) was not.
+        self.assertTrue(ArticleEmbedding.objects.filter(article_id='a2').exists())
+        self.assertFalse(ArticleEmbedding.objects.filter(article_id='a1').exists())
+
+
+class BackfillPerRowExceptionTest(BackfillEmbeddingsBaseTest):
+    def test_per_row_failure_continues_and_counts_failed(self):
+        """If _compute_passage_embedding raises for one article, the other
+        articles still process and the summary reports failed: 1."""
+        mock_ingestor_module = MagicMock()
+        mock_ingestor_module.iter_articles.return_value = iter([
+            {'platform': 'opengov', 'article_id': 'a1', 'article': 'good', 'comments': []},
+            {'platform': 'opengov', 'article_id': 'a2', 'article': 'bad', 'comments': []},
+        ])
+
+        def fake_emb_with_one_failure(article, comments, language):
+            if article == 'bad':
+                raise RuntimeError('synthetic failure')
+            return np.array([0.1, 0.2, 0.3])
+
+        out = io.StringIO()
+        err = io.StringIO()
+        with patch('topic_extraction.management.commands.backfill_embeddings._get_ingestor',
+                   return_value=mock_ingestor_module):
+            with patch('topic_extraction.management.commands.backfill_embeddings._compute_passage_embedding',
+                       side_effect=fake_emb_with_one_failure):
+                call_command('backfill_embeddings', '--source', 'opengov', stdout=out, stderr=err)
+
+        output = out.getvalue()
+        self.assertIn('Created: 1', output)
+        self.assertIn('failed: 1', output)
+        # The good article was still embedded.
+        self.assertTrue(ArticleEmbedding.objects.filter(article_id='a1').exists())
+        # The bad article was not.
+        self.assertFalse(ArticleEmbedding.objects.filter(article_id='a2').exists())
+        # Failure was logged to stderr.
+        self.assertIn('FAILED', err.getvalue())
+        self.assertIn('a2', err.getvalue())

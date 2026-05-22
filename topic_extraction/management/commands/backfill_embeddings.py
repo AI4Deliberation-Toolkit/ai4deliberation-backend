@@ -6,6 +6,10 @@ UPSERTs the ArticleEmbedding row.
 
 See docs/superpowers/specs/2026-05-21-article-similarity-design.md section
 3 (Embedding write path → Backfill) for the full design.
+
+Note: per-article writes are independent; no outer transaction wraps the
+loop so a single bad row does not roll back the rest. The per-row try/
+except in `handle` increments the `failed` counter and continues.
 """
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
@@ -61,63 +65,66 @@ class Command(BaseCommand):
         skipped_where_model = 0
         failed = 0
 
-        for article_data in ingestor.iter_articles():
-            try:
-                platform = article_data['platform']
-                article_id = article_data['article_id']
-                article_text = article_data['article']
-                comments = article_data.get('comments', [])
+        try:
+            for article_data in ingestor.iter_articles():
+                try:
+                    platform = article_data['platform']
+                    article_id = article_data['article_id']
+                    article_text = article_data['article']
+                    comments = article_data.get('comments', [])
 
-                if platform_filter and platform != platform_filter:
-                    continue
-
-                at = ArticleTopic.objects.filter(
-                    platform=platform, article_id=article_id
-                ).order_by('-computed_at').first()
-                if at is None:
-                    skipped_no_articletopic += 1
-                    continue
-
-                if language_filter and at.language != language_filter:
-                    continue
-
-                existing = ArticleEmbedding.objects.filter(
-                    platform=platform, article_id=article_id
-                ).first()
-
-                if only_missing and existing is not None:
-                    skipped_only_missing += 1
-                    continue
-
-                if where_model is not None:
-                    if existing is None or existing.embedding_model_name != where_model:
-                        skipped_where_model += 1
+                    if platform_filter and platform != platform_filter:
                         continue
 
-                passage_emb = _compute_passage_embedding(
-                    article_text, comments, at.language
-                )
+                    at = ArticleTopic.objects.filter(
+                        platform=platform, article_id=article_id
+                    ).order_by('-computed_at').first()
+                    if at is None:
+                        skipped_no_articletopic += 1
+                        continue
 
-                _, was_created = ArticleEmbedding.objects.update_or_create(
-                    platform=platform,
-                    article_id=article_id,
-                    defaults={
-                        'language': at.language,
-                        'vector': passage_emb.tolist(),
-                        'embedding_model_name': settings.EMBEDDING_MODEL_NAME,
-                    }
-                )
-                if was_created:
-                    created += 1
-                else:
-                    updated += 1
+                    if language_filter and at.language != language_filter:
+                        continue
 
-            except Exception as e:
-                failed += 1
-                self.stderr.write(
-                    f'  FAILED ({type(e).__name__}): '
-                    f'{article_data.get("platform", "?")}/{article_data.get("article_id", "?")} — {e}'
-                )
+                    existing = ArticleEmbedding.objects.filter(
+                        platform=platform, article_id=article_id
+                    ).first()
+
+                    if only_missing and existing is not None:
+                        skipped_only_missing += 1
+                        continue
+
+                    if where_model is not None:
+                        if existing is None or existing.embedding_model_name != where_model:
+                            skipped_where_model += 1
+                            continue
+
+                    passage_emb = _compute_passage_embedding(
+                        article_text, comments, at.language
+                    )
+
+                    _, was_created = ArticleEmbedding.objects.update_or_create(
+                        platform=platform,
+                        article_id=article_id,
+                        defaults={
+                            'language': at.language,
+                            'vector': passage_emb.tolist(),
+                            'embedding_model_name': settings.EMBEDDING_MODEL_NAME,
+                        }
+                    )
+                    if was_created:
+                        created += 1
+                    else:
+                        updated += 1
+
+                except Exception as e:
+                    failed += 1
+                    self.stderr.write(
+                        f'  FAILED ({type(e).__name__}): '
+                        f'{article_data.get("platform", "?")}/{article_data.get("article_id", "?")} — {e}'
+                    )
+        except FileNotFoundError as e:
+            raise CommandError(f'Source file not found: {e}')
 
         self.stdout.write(self.style.SUCCESS(
             f'Done. Created: {created}, updated: {updated}, '
