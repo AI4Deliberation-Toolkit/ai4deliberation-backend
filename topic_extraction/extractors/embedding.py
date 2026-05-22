@@ -7,6 +7,24 @@ from topic_extraction.extractors.base import BaseExtractor, TopicResult
 from topic_extraction.taxonomy import get_embedding_model, get_taxonomy_embeddings
 
 
+def _compute_passage_embedding(article: str, comments: list[str], language: str) -> np.ndarray:
+    """Shared passage-embedding computation used by both live extraction and
+    backfill. Concatenates article + first 20 comments and runs the embedding
+    model (`get_embedding_model`, which honors `settings.EMBEDDING_MODEL_NAME`).
+    Returns a normalized numpy vector ready for cosine similarity.
+
+    Used by:
+    - _compute_similarity_scores (below) for live extraction in the same call.
+    - topic_extraction/management/commands/backfill_embeddings.py for bulk
+      historical backfill. Bit-identical output for the same input is a
+      load-bearing invariant — tests in test_extractors.py and the end-to-end
+      parity test in test_backfill_embeddings.py lock it down.
+    """
+    passage = article + ' ' + ' '.join(comments[:20])
+    model = get_embedding_model()
+    return model.encode([passage], convert_to_numpy=True, normalize_embeddings=True)[0]
+
+
 def _compute_similarity_scores(article: str, comments: list[str], language: str):
     """Shared first stage: passage embedding → cosine similarity vs taxonomy.
 
@@ -14,9 +32,7 @@ def _compute_similarity_scores(article: str, comments: list[str], language: str)
     """
     topics, taxonomy_embeddings = get_taxonomy_embeddings(language)
     candidate_labels = [t.labels.get(language) or t.label_en for t in topics]
-    passage = article + ' ' + ' '.join(comments[:20])
-    model = get_embedding_model()
-    passage_emb = model.encode([passage], convert_to_numpy=True, normalize_embeddings=True)[0]
+    passage_emb = _compute_passage_embedding(article, comments, language)
     emb_scores = util.cos_sim(passage_emb, taxonomy_embeddings)[0].numpy()
     return topics, candidate_labels, emb_scores
 

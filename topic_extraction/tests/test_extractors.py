@@ -5,7 +5,7 @@ from django.test import TestCase
 from topic_extraction.extractors.base import BaseExtractor, TopicResult
 from topic_extraction.models import Topic
 from topic_extraction.taxonomy import invalidate_taxonomy_cache
-from topic_extraction.extractors.embedding import EmbeddingExtractor, EmbeddingSimilarityExtractor
+from topic_extraction.extractors.embedding import EmbeddingExtractor, EmbeddingSimilarityExtractor, _compute_passage_embedding
 from topic_extraction.extractors.llm import LLMExtractor
 
 
@@ -279,3 +279,43 @@ class LLMExtractorTest(TestCase):
 
         self.assertEqual(len(results), 1)
         self.assertEqual(results[0].label, 'Good Topic')
+
+
+class ComputePassageEmbeddingTest(TestCase):
+    """Tests the shared helper that produces the per-article passage embedding.
+    Used by both EmbeddingSimilarityExtractor (live writes) and
+    backfill_embeddings (bulk writes). The bit-identical contract is tested
+    in Task 3 via EmbeddingSimilarityExtractor.extract_with_embedding."""
+
+    def test_returns_numpy_array(self):
+        vec = _compute_passage_embedding('hello world', [], 'en')
+        self.assertIsInstance(vec, np.ndarray)
+
+    def test_shape_matches_mpnet_dimension(self):
+        # paraphrase-multilingual-mpnet-base-v2 produces 768-dim vectors.
+        vec = _compute_passage_embedding('hello world', [], 'en')
+        self.assertEqual(vec.shape, (768,))
+
+    def test_deterministic_for_same_input(self):
+        vec1 = _compute_passage_embedding('hello world', [], 'en')
+        vec2 = _compute_passage_embedding('hello world', [], 'en')
+        # mpnet on the same input + normalize_embeddings=True is deterministic.
+        np.testing.assert_array_equal(vec1, vec2)
+
+    def test_includes_first_20_comments(self):
+        # Verify the helper concatenates article + first 20 comments (matching
+        # the existing _compute_similarity_scores semantics).
+        article = 'main article text'
+        comments = [f'comment {i}' for i in range(25)]  # 25 comments
+
+        vec_with_first_20 = _compute_passage_embedding(article, comments, 'en')
+        vec_with_explicit_first_20 = _compute_passage_embedding(article, comments[:20], 'en')
+        np.testing.assert_array_equal(vec_with_first_20, vec_with_explicit_first_20)
+
+        # 21st+ comments should NOT affect the embedding.
+        vec_with_first_20_only = _compute_passage_embedding(article, comments[:20], 'en')
+        np.testing.assert_array_equal(vec_with_first_20, vec_with_first_20_only)
+
+    def test_empty_comments_works(self):
+        vec = _compute_passage_embedding('article only', [], 'en')
+        self.assertEqual(vec.shape, (768,))
