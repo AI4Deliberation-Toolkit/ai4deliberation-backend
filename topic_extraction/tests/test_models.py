@@ -1,6 +1,8 @@
+import time
 import uuid
+from django.db import IntegrityError
 from django.test import TestCase
-from topic_extraction.models import Topic, ArticleTopic
+from topic_extraction.models import Topic, ArticleTopic, ArticleEmbedding
 
 
 class TopicModelTest(TestCase):
@@ -104,3 +106,105 @@ class ArticleTopicLanguageSourceTest(TestCase):
             language_source='explicit',
         )
         self.assertEqual(at.language_source, 'explicit')
+
+
+class ArticleEmbeddingTest(TestCase):
+    def test_create_with_required_fields(self):
+        emb = ArticleEmbedding.objects.create(
+            platform='opengov',
+            article_id='123',
+            language='el',
+            vector=[0.1, 0.2, 0.3],
+            embedding_model_name='paraphrase-multilingual-mpnet-base-v2',
+        )
+        self.assertEqual(emb.platform, 'opengov')
+        self.assertEqual(emb.article_id, '123')
+        self.assertEqual(emb.language, 'el')
+        self.assertEqual(emb.vector, [0.1, 0.2, 0.3])
+        self.assertEqual(emb.embedding_model_name, 'paraphrase-multilingual-mpnet-base-v2')
+        self.assertIsNotNone(emb.computed_at)
+        self.assertIsInstance(emb.id, uuid.UUID)
+
+    def test_unique_together_on_platform_and_article_id(self):
+        ArticleEmbedding.objects.create(
+            platform='opengov',
+            article_id='123',
+            language='el',
+            vector=[0.1],
+            embedding_model_name='m1',
+        )
+        with self.assertRaises(IntegrityError):
+            ArticleEmbedding.objects.create(
+                platform='opengov',
+                article_id='123',
+                language='el',
+                vector=[0.2],
+                embedding_model_name='m2',
+            )
+
+    def test_upsert_via_update_or_create(self):
+        emb1, created1 = ArticleEmbedding.objects.update_or_create(
+            platform='opengov',
+            article_id='123',
+            defaults={
+                'language': 'el',
+                'vector': [0.1],
+                'embedding_model_name': 'm1',
+            }
+        )
+        self.assertTrue(created1)
+
+        emb2, created2 = ArticleEmbedding.objects.update_or_create(
+            platform='opengov',
+            article_id='123',
+            defaults={
+                'language': 'en',
+                'vector': [0.2],
+                'embedding_model_name': 'm2',
+            }
+        )
+        self.assertFalse(created2)
+        self.assertEqual(emb1.id, emb2.id)
+        self.assertEqual(emb2.vector, [0.2])
+        self.assertEqual(emb2.language, 'en')
+        self.assertEqual(emb2.embedding_model_name, 'm2')
+
+    def test_computed_at_updates_on_save(self):
+        emb = ArticleEmbedding.objects.create(
+            platform='opengov',
+            article_id='123',
+            language='el',
+            vector=[0.1],
+            embedding_model_name='m1',
+        )
+        initial_ts = emb.computed_at
+        time.sleep(0.01)
+        emb.vector = [0.2]
+        emb.save()
+        emb.refresh_from_db()
+        self.assertGreater(emb.computed_at, initial_ts)
+
+    def test_string_representation(self):
+        emb = ArticleEmbedding.objects.create(
+            platform='opengov',
+            article_id='123',
+            language='el',
+            vector=[0.1],
+            embedding_model_name='m1',
+        )
+        self.assertEqual(str(emb), 'opengov/123')
+
+    def test_different_platform_or_article_id_allowed(self):
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='123', language='el',
+            vector=[0.1], embedding_model_name='m1',
+        )
+        ArticleEmbedding.objects.create(
+            platform='bridge', article_id='123', language='el',
+            vector=[0.2], embedding_model_name='m1',
+        )
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='456', language='el',
+            vector=[0.3], embedding_model_name='m1',
+        )
+        self.assertEqual(ArticleEmbedding.objects.count(), 3)

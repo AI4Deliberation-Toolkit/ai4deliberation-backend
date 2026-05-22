@@ -50,3 +50,22 @@ class ArticleTopic(models.Model):
 
     class Meta:
         ordering = ['-computed_at']
+
+
+class ArticleEmbedding(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    article_id = models.CharField(max_length=255)
+    platform = models.CharField(max_length=100)
+    language = models.CharField(max_length=10)
+    vector = models.JSONField()
+    embedding_model_name = models.CharField(max_length=200)
+    computed_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        unique_together = [('platform', 'article_id')]
+        indexes = [
+            models.Index(fields=['platform', 'language', 'embedding_model_name']),
+        ]
+
+    def __str__(self):
+        return f'{self.platform}/{self.article_id}'
