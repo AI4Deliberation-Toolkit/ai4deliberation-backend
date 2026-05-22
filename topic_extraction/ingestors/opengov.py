@@ -3,6 +3,31 @@ import os
 from topic_extraction.ingestors.base import BaseIngestor, Conversation
 
 
+def iter_articles(source_path=None):
+    """Module-level iteration helper used by backfill_embeddings.
+
+    Yields one dict per article: {'platform', 'article_id', 'article', 'comments'}.
+    Default source_path resolves to the production parquet location under
+    settings.BASE_DIR (override-able via OPENGOV_PARQUET_PATH setting).
+    """
+    if source_path is None:
+        from django.conf import settings
+        default_path = os.path.join(
+            getattr(settings, 'BASE_DIR', os.getcwd()),
+            'resources', 'deliberations', 'opengov_deliberations_v2.parquet',
+        )
+        source_path = getattr(settings, 'OPENGOV_PARQUET_PATH', default_path)
+
+    ingestor = OpengovIngestor()
+    for c in ingestor.load(source_path):
+        yield {
+            'platform': c.platform,
+            'article_id': c.article_id,
+            'article': c.article,
+            'comments': c.comments,
+        }
+
+
 class OpengovIngestor(BaseIngestor):
     """Ingestor for opengov.gr deliberation parquet files.
 
