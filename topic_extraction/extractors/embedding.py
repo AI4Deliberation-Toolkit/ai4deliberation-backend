@@ -65,14 +65,33 @@ class EmbeddingSimilarityExtractor(BaseExtractor):
     """
 
     def extract(self, article: str, comments: list[str], language: str = 'en') -> list[TopicResult]:
-        topics, candidate_labels, emb_scores = _compute_similarity_scores(article, comments, language)
+        """Topics-only wrapper preserved for backwards compatibility. Direct
+        callers (like the legacy `pipeline.run` path before Task 4) get the
+        same shape they did before. New callers wanting the passage embedding
+        for persistence should use `extract_with_embedding`."""
+        topics, _passage_emb = self.extract_with_embedding(article, comments, language)
+        return topics
+
+    def extract_with_embedding(self, article: str, comments: list[str], language: str = 'en') -> tuple[list[TopicResult], np.ndarray]:
+        """Returns (topics, passage_embedding). The passage_embedding is the
+        same vector used internally for taxonomy similarity scoring — exposed
+        here so the pipeline can persist it to ArticleEmbedding without
+        recomputing. Bit-identical to _compute_passage_embedding(article,
+        comments, language)."""
+        # We can't reuse _compute_similarity_scores wholesale because it
+        # returns (topics, candidate_labels, emb_scores), not the vector
+        # itself. So compute the vector via the shared helper and then
+        # replicate the scoring logic over emb_scores using the same
+        # taxonomy data.
+        passage_emb = _compute_passage_embedding(article, comments, language)
+        topics, taxonomy_embeddings = get_taxonomy_embeddings(language)
+        candidate_labels = [t.labels.get(language) or t.label_en for t in topics]
+        emb_scores = util.cos_sim(passage_emb, taxonomy_embeddings)[0].numpy()
 
         mean = float(np.mean(emb_scores))
         std = float(np.std(emb_scores))
         if std == 0.0:
-            # Degenerate: every leaf scored identically against this article.
-            # No meaningful "distinctive" match — return nothing.
-            return []
+            return [], passage_emb  # Degenerate; still return the vector.
 
         z_scores = (emb_scores - mean) / std
         z_threshold = getattr(settings, 'EMBEDDING_Z_THRESHOLD', 1.0)
@@ -87,7 +106,7 @@ class EmbeddingSimilarityExtractor(BaseExtractor):
                     raw_score=round(float(emb_scores[i]), 4),
                 ))
         results.sort(key=lambda x: x.score, reverse=True)
-        return results[:10]
+        return results[:10], passage_emb
 
 
 class EmbeddingExtractor(BaseExtractor):
@@ -111,7 +130,14 @@ class EmbeddingExtractor(BaseExtractor):
         return self._zero_shot_pipeline
 
     def extract(self, article: str, comments: list[str], language: str = 'en') -> list[TopicResult]:
-        topics, candidate_labels, emb_scores = _compute_similarity_scores(article, comments, language)
+        topics, _passage_emb = self.extract_with_embedding(article, comments, language)
+        return topics
+
+    def extract_with_embedding(self, article: str, comments: list[str], language: str = 'en') -> tuple[list[TopicResult], np.ndarray]:
+        passage_emb = _compute_passage_embedding(article, comments, language)
+        topics, taxonomy_embeddings = get_taxonomy_embeddings(language)
+        candidate_labels = [t.labels.get(language) or t.label_en for t in topics]
+        emb_scores = util.cos_sim(passage_emb, taxonomy_embeddings)[0].numpy()
 
         zs = self._get_zero_shot()
         article_truncated = article[:1000]
@@ -129,4 +155,4 @@ class EmbeddingExtractor(BaseExtractor):
                 results.append(TopicResult(label=label, score=round(avg_score, 4)))
 
         results.sort(key=lambda x: x.score, reverse=True)
-        return results[:10]
+        return results[:10], passage_emb

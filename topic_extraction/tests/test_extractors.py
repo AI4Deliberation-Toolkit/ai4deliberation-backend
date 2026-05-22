@@ -327,3 +327,85 @@ class ComputePassageEmbeddingTest(TestCase):
         unbounded and ranking degrades silently — this test catches the regression."""
         vec = _compute_passage_embedding('hello world', [], 'en')
         self.assertAlmostEqual(float(np.linalg.norm(vec)), 1.0, places=5)
+
+
+class ExtractWithEmbeddingTest(TestCase):
+    """Verifies the bit-identical invariant between extract_with_embedding
+    and _compute_passage_embedding — load-bearing for backfill parity."""
+
+    def setUp(self):
+        # The embedding extractors compute against the taxonomy, so they
+        # need at least one active Topic in the DB to score against.
+        from django.core.management import call_command
+        call_command('seed_taxonomy')
+
+    def test_similarity_extract_with_embedding_returns_tuple(self):
+        from topic_extraction.extractors.embedding import EmbeddingSimilarityExtractor
+        extractor = EmbeddingSimilarityExtractor()
+        result = extractor.extract_with_embedding('test article', [], 'en')
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+        topics, vector = result
+        self.assertIsInstance(topics, list)
+        self.assertIsInstance(vector, np.ndarray)
+
+    def test_similarity_extract_with_embedding_vector_matches_helper(self):
+        """The bit-identical invariant: extract_with_embedding's returned
+        vector must equal _compute_passage_embedding for the same input.
+        Otherwise live extraction and backfill produce divergent vectors and
+        cosine ranking becomes incoherent."""
+        from topic_extraction.extractors.embedding import (
+            EmbeddingSimilarityExtractor, _compute_passage_embedding,
+        )
+        article = 'test article'
+        comments = ['comment one', 'comment two']
+        language = 'en'
+
+        extractor = EmbeddingSimilarityExtractor()
+        _, vec_from_extractor = extractor.extract_with_embedding(article, comments, language)
+        vec_from_helper = _compute_passage_embedding(article, comments, language)
+
+        np.testing.assert_array_equal(vec_from_extractor, vec_from_helper)
+
+    def test_similarity_extract_wrapper_preserves_interface(self):
+        """The existing extract() method must still return just topics —
+        backwards-compat for any direct callers."""
+        from topic_extraction.extractors.embedding import EmbeddingSimilarityExtractor
+        extractor = EmbeddingSimilarityExtractor()
+        result = extractor.extract('test article', [], 'en')
+        self.assertIsInstance(result, list)
+        # Each item should be a TopicResult, not a vector.
+        from topic_extraction.extractors.base import TopicResult
+        for item in result:
+            self.assertIsInstance(item, TopicResult)
+
+    def test_full_extractor_extract_with_embedding_returns_tuple(self):
+        """Same contract on EmbeddingExtractor (the zero-shot one)."""
+        from topic_extraction.extractors.embedding import EmbeddingExtractor
+        extractor = EmbeddingExtractor()
+        result = extractor.extract_with_embedding('test article', [], 'en')
+        self.assertIsInstance(result, tuple)
+        self.assertEqual(len(result), 2)
+
+    def test_full_extractor_extract_with_embedding_vector_matches_helper(self):
+        """Same bit-identical invariant on EmbeddingExtractor."""
+        from topic_extraction.extractors.embedding import (
+            EmbeddingExtractor, _compute_passage_embedding,
+        )
+        article = 'another test'
+        comments = []
+        extractor = EmbeddingExtractor()
+        _, vec_from_extractor = extractor.extract_with_embedding(article, comments, 'en')
+        vec_from_helper = _compute_passage_embedding(article, comments, 'en')
+        np.testing.assert_array_equal(vec_from_extractor, vec_from_helper)
+
+    def test_full_extractor_extract_wrapper_preserves_interface(self):
+        """The existing extract() method on EmbeddingExtractor must still
+        return just topics."""
+        from topic_extraction.extractors.embedding import EmbeddingExtractor
+        from topic_extraction.extractors.base import TopicResult
+        extractor = EmbeddingExtractor()
+        result = extractor.extract('another test', [], 'en')
+        self.assertIsInstance(result, list)
+        for item in result:
+            self.assertIsInstance(item, TopicResult)
