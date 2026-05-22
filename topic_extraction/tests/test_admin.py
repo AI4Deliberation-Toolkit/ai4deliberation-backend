@@ -54,3 +54,24 @@ class ArticleTopicAdminTest(TestCase):
         from topic_extraction.models import ArticleTopic
         admin_cls = site._registry[ArticleTopic]
         self.assertFalse(admin_cls.has_delete_permission(None))
+
+
+class ArticleEmbeddingAdminTest(TestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+
+    def test_admin_is_registered(self):
+        from topic_extraction.models import ArticleEmbedding
+        self.assertIn(ArticleEmbedding, site._registry)
+
+    def test_all_fields_are_readonly(self):
+        from topic_extraction.models import ArticleEmbedding
+        admin_cls = site._registry[ArticleEmbedding]
+        for field in ('id', 'platform', 'article_id', 'language', 'vector',
+                      'embedding_model_name', 'computed_at'):
+            self.assertIn(field, admin_cls.readonly_fields)
+
+    def test_admin_blocks_delete(self):
+        from topic_extraction.models import ArticleEmbedding
+        admin_cls = site._registry[ArticleEmbedding]
+        self.assertFalse(admin_cls.has_delete_permission(None))

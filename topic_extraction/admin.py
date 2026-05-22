@@ -1,5 +1,5 @@
 from django.contrib import admin
-from topic_extraction.models import Topic, ArticleTopic
+from topic_extraction.models import Topic, ArticleTopic, ArticleEmbedding
 
 
 @admin.register(Topic)
@@ -22,6 +22,19 @@ class ArticleTopicAdmin(admin.ModelAdmin):
     readonly_fields = (
         'id', 'article_id', 'platform', 'language', 'language_source',
         'raw_topics', 'normalized', 'backend', 'taxonomy_version', 'computed_at',
+    )
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(ArticleEmbedding)
+class ArticleEmbeddingAdmin(admin.ModelAdmin):
+    list_display = ('platform', 'article_id', 'language', 'embedding_model_name', 'computed_at')
+    search_fields = ('platform', 'article_id')
+    readonly_fields = (
+        'id', 'platform', 'article_id', 'language', 'vector',
+        'embedding_model_name', 'computed_at',
     )
 
     def has_delete_permission(self, request, obj=None):
