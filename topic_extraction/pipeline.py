@@ -28,10 +28,18 @@ def extract(
     backend: str | None = None,
 ) -> dict:
     """Detect language → extract → normalize. Returns the payload that would
-    be written to ArticleTopic, but does NOT persist.
+    be written to ArticleTopic (plus a new `passage_embedding` field for the
+    ArticleEmbedding write), but does NOT persist.
 
     Used by corpus_pass and other read-only flows that want extraction
     results without DB side effects.
+
+    The returned dict has the same keys as before, plus:
+        passage_embedding: list[float] | None
+            The article+comments passage vector if the extractor produced one
+            (embedding-based backends), else None. Callers wishing to persist
+            it (like `run` below) write it to ArticleEmbedding; corpus_pass
+            and similar may discard.
 
     Args:
         backend: Optional backend override ('embedding', 'embedding_similarity',
@@ -41,11 +49,17 @@ def extract(
 
     extractor = _get_extractor(backend)
     effective_backend = backend or getattr(settings, 'EXTRACTION_BACKEND', 'embedding')
+    passage_emb = None
     try:
-        raw_topics = extractor.extract(article, comments, language)
+        if hasattr(extractor, 'extract_with_embedding'):
+            raw_topics, passage_emb = extractor.extract_with_embedding(article, comments, language)
+        else:
+            raw_topics = extractor.extract(article, comments, language)
     except Exception:
+        # Fallback path: EmbeddingExtractor (the slow zero-shot one) is the
+        # safety net. It always produces an embedding.
         from topic_extraction.extractors.embedding import EmbeddingExtractor
-        raw_topics = EmbeddingExtractor().extract(article, comments, language)
+        raw_topics, passage_emb = EmbeddingExtractor().extract_with_embedding(article, comments, language)
         effective_backend = 'embedding'
 
     normalized = normalize(raw_topics, language)
@@ -65,6 +79,7 @@ def extract(
         ],
         'backend': effective_backend,
         'taxonomy_version': TAXONOMY_VERSION,
+        'passage_embedding': passage_emb.tolist() if passage_emb is not None else None,
     }
 
 
@@ -77,6 +92,8 @@ def run(
     backend: str | None = None,
 ) -> ArticleTopic:
     """Detect language → extract → normalize → persist a new ArticleTopic row.
+    Also UPSERTs an ArticleEmbedding row in the same transaction when the
+    extractor produced a passage embedding (i.e. for embedding-based backends).
 
     Args:
         article_id: External identifier from the source platform.
@@ -92,5 +109,23 @@ def run(
     Raises:
         ValueError: if explicit_language is not in settings.TOPIC_LANGUAGES.
     """
+    from django.db import transaction
+    from topic_extraction.models import ArticleEmbedding
+
     payload = extract(article_id, platform, article, comments, explicit_language, backend)
-    return ArticleTopic.objects.create(**payload)
+    # Pop the embedding field; ArticleTopic doesn't have a vector column.
+    passage_embedding = payload.pop('passage_embedding', None)
+
+    with transaction.atomic():
+        record = ArticleTopic.objects.create(**payload)
+        if passage_embedding is not None:
+            ArticleEmbedding.objects.update_or_create(
+                platform=platform,
+                article_id=article_id,
+                defaults={
+                    'language': record.language,
+                    'vector': passage_embedding,
+                    'embedding_model_name': settings.EMBEDDING_MODEL_NAME,
+                },
+            )
+    return record
