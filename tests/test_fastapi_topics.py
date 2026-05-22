@@ -86,3 +86,41 @@ class FastAPIArticleSimilarityTest(TransactionTestCase):
         # out in this task. Hitting it returns 404 (FastAPI route not found).
         r = self.client.post('/recommend', json={'current_text': 'x', 'all_texts': ['y']})
         self.assertEqual(r.status_code, 404)
+
+    def test_topic_slug_filter_happy_path(self):
+        """Filtering by a leaf slug returns only candidates tagged with that slug.
+        Symmetric coverage with DRF; underlying logic is in test_similarity.py."""
+        from topic_extraction.models import ArticleTopic
+
+        # Tag c1 with 'housing'; src has no ArticleTopic (so won't appear anyway,
+        # and we're not the source here).
+        ArticleTopic.objects.create(
+            article_id='c1', platform='opengov', language='en',
+            language_source='detected',
+            raw_topics=[],
+            normalized=[{'topic_id': 'housing', 'score': 1.0, 'raw_score': 0.8}],
+            backend='embedding_similarity', taxonomy_version='test',
+        )
+        r = self.client.get('/articles/opengov/src/similar?k=10&topic_slug=housing')
+        self.assertEqual(r.status_code, 200)
+        body = r.json()
+        self.assertEqual(body['count'], 1)
+        self.assertEqual(body['results'][0]['article_id'], 'c1')
+
+        # Filtering by a different slug yields zero.
+        r2 = self.client.get('/articles/opengov/src/similar?k=10&topic_slug=education_policy')
+        self.assertEqual(r2.status_code, 200)
+        self.assertEqual(r2.json()['count'], 0)
+
+    def test_default_k_is_10(self):
+        """No `k` query param → default to 10. Returns what's available
+        (1 candidate in this fixture)."""
+        r = self.client.get('/articles/opengov/src/similar')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()['count'], 1)
+
+    def test_non_integer_k_returns_422(self):
+        """FastAPI's Pydantic auto-validation rejects non-integer k with 422.
+        Documented divergence from DRF (which returns 400 via hand-rolled check)."""
+        r = self.client.get('/articles/opengov/src/similar?k=abc')
+        self.assertEqual(r.status_code, 422)
