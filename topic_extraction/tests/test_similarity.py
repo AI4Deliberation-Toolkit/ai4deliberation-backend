@@ -65,6 +65,17 @@ class FindSimilarHappyPathTest(TestCase):
         self.assertTrue(hasattr(r, 'raw_score'))
         self.assertTrue(hasattr(r, 'z_score'))
 
+    def test_raw_score_rounded_to_4_decimals(self):
+        """raw_score is round(float(cosine), 4). The view/serializer can rely
+        on at most 4 decimal places in the JSON payload."""
+        from topic_extraction.similarity import find_similar
+        results = find_similar('opengov', 'src', k=1)
+        r = results[0]
+        # Format to a fixed-width string to inspect decimals.
+        formatted = f'{r.raw_score:.10f}'.rstrip('0').rstrip('.')
+        decimals = formatted.split('.')[1] if '.' in formatted else ''
+        self.assertLessEqual(len(decimals), 4, f'raw_score has more than 4 decimals: {r.raw_score}')
+
 
 class FindSimilarMissingSourceTest(TestCase):
     def test_raises_source_not_found(self):
@@ -191,6 +202,27 @@ class FindSimilarZScoreTest(TestCase):
         results = find_similar('opengov', 'src', k=12)
         for r in results:
             self.assertIsNotNone(r.z_score)
+
+
+class FindSimilarDegenerateStdTest(TestCase):
+    """When all candidates are identically close to the source, std == 0
+    and the code path sets z_score to 0.0 for every result instead of None.
+    The threshold (pool >= 10) still applies."""
+
+    def test_identical_candidates_zero_std_pool_ge_10(self):
+        # Source plus 12 candidates with identical vectors — all cosine
+        # similarities to source are exactly 1.0, so std == 0 in float32.
+        _make_embedding('opengov', 'src', 'en', [1.0, 0.0])
+        for i in range(12):
+            _make_embedding('opengov', f'c{i}', 'en', [1.0, 0.0])
+        from topic_extraction.similarity import find_similar
+        results = find_similar('opengov', 'src', k=12)
+        self.assertEqual(len(results), 12)
+        for r in results:
+            # std == 0 path: z_score is 0.0, NOT None.
+            self.assertEqual(r.z_score, 0.0)
+            # raw_score is the identical cosine value (1.0 for these vectors).
+            self.assertIsNotNone(r.raw_score)
 
 
 class FindSimilarStabilityTest(TestCase):

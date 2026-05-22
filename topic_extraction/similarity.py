@@ -147,10 +147,12 @@ def _filter_by_topic_slug(candidates, topic_slug):
     # Pull latest ArticleTopic per (platform, article_id) for the candidate set.
     candidate_keys = {(c.platform, c.article_id) for c in candidates}
     candidate_platforms = {k[0] for k in candidate_keys}
+    candidate_article_ids = {k[1] for k in candidate_keys}
     latest_topics: dict[tuple[str, str], ArticleTopic] = {}
     for at in ArticleTopic.objects.filter(
         platform__in=candidate_platforms,
-    ).order_by('-computed_at'):
+        article_id__in=candidate_article_ids,
+    ).order_by('-computed_at', '-id'):
         key = (at.platform, at.article_id)
         if key in candidate_keys and key not in latest_topics:
             latest_topics[key] = at
