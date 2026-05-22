@@ -319,3 +319,11 @@ class ComputePassageEmbeddingTest(TestCase):
     def test_empty_comments_works(self):
         vec = _compute_passage_embedding('article only', [], 'en')
         self.assertEqual(vec.shape, (768,))
+
+    def test_returns_l2_normalized_vector(self):
+        """Locks down the `normalize_embeddings=True` contract that the docstring
+        promises and that Tasks 3/8 (extractor + backfill) rely on for cosine
+        ranking. If normalization is ever dropped, cosine similarity becomes
+        unbounded and ranking degrades silently — this test catches the regression."""
+        vec = _compute_passage_embedding('hello world', [], 'en')
+        self.assertAlmostEqual(float(np.linalg.norm(vec)), 1.0, places=5)

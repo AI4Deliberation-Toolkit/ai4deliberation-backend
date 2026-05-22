@@ -13,6 +13,9 @@ def _compute_passage_embedding(article: str, comments: list[str], language: str)
     model (`get_embedding_model`, which honors `settings.EMBEDDING_MODEL_NAME`).
     Returns a normalized numpy vector ready for cosine similarity.
 
+    `language` is accepted but unused — kept in the signature so a future
+    language-specific encoder swap can use it without changing call sites.
+
     Used by:
     - _compute_similarity_scores (below) for live extraction in the same call.
     - topic_extraction/management/commands/backfill_embeddings.py for bulk
