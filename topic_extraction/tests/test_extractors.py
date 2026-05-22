@@ -338,6 +338,7 @@ class ExtractWithEmbeddingTest(TestCase):
         # need at least one active Topic in the DB to score against.
         from django.core.management import call_command
         call_command('seed_taxonomy')
+        invalidate_taxonomy_cache()
 
     def test_similarity_extract_with_embedding_returns_tuple(self):
         from topic_extraction.extractors.embedding import EmbeddingSimilarityExtractor
@@ -379,16 +380,30 @@ class ExtractWithEmbeddingTest(TestCase):
         for item in result:
             self.assertIsInstance(item, TopicResult)
 
-    def test_full_extractor_extract_with_embedding_returns_tuple(self):
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    def test_full_extractor_extract_with_embedding_returns_tuple(self, mock_hf_pipeline):
         """Same contract on EmbeddingExtractor (the zero-shot one)."""
+        mock_zs_pipeline = MagicMock()
+        mock_zs_pipeline.side_effect = lambda text, labels, **kw: {
+            'labels': labels, 'scores': [0.5] * len(labels)
+        }
+        mock_hf_pipeline.return_value = mock_zs_pipeline
+
         from topic_extraction.extractors.embedding import EmbeddingExtractor
         extractor = EmbeddingExtractor()
         result = extractor.extract_with_embedding('test article', [], 'en')
         self.assertIsInstance(result, tuple)
         self.assertEqual(len(result), 2)
 
-    def test_full_extractor_extract_with_embedding_vector_matches_helper(self):
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    def test_full_extractor_extract_with_embedding_vector_matches_helper(self, mock_hf_pipeline):
         """Same bit-identical invariant on EmbeddingExtractor."""
+        mock_zs_pipeline = MagicMock()
+        mock_zs_pipeline.side_effect = lambda text, labels, **kw: {
+            'labels': labels, 'scores': [0.5] * len(labels)
+        }
+        mock_hf_pipeline.return_value = mock_zs_pipeline
+
         from topic_extraction.extractors.embedding import (
             EmbeddingExtractor, _compute_passage_embedding,
         )
@@ -399,9 +414,16 @@ class ExtractWithEmbeddingTest(TestCase):
         vec_from_helper = _compute_passage_embedding(article, comments, 'en')
         np.testing.assert_array_equal(vec_from_extractor, vec_from_helper)
 
-    def test_full_extractor_extract_wrapper_preserves_interface(self):
+    @patch('topic_extraction.extractors.embedding.hf_pipeline')
+    def test_full_extractor_extract_wrapper_preserves_interface(self, mock_hf_pipeline):
         """The existing extract() method on EmbeddingExtractor must still
         return just topics."""
+        mock_zs_pipeline = MagicMock()
+        mock_zs_pipeline.side_effect = lambda text, labels, **kw: {
+            'labels': labels, 'scores': [0.5] * len(labels)
+        }
+        mock_hf_pipeline.return_value = mock_zs_pipeline
+
         from topic_extraction.extractors.embedding import EmbeddingExtractor
         from topic_extraction.extractors.base import TopicResult
         extractor = EmbeddingExtractor()

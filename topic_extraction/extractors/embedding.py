@@ -16,28 +16,13 @@ def _compute_passage_embedding(article: str, comments: list[str], language: str)
     `language` is accepted but unused — kept in the signature so a future
     language-specific encoder swap can use it without changing call sites.
 
-    Used by:
-    - _compute_similarity_scores (below) for live extraction in the same call.
-    - topic_extraction/management/commands/backfill_embeddings.py for bulk
-      historical backfill. Bit-identical output for the same input is a
-      load-bearing invariant — tests in test_extractors.py and the end-to-end
-      parity test in test_backfill_embeddings.py lock it down.
+    Bit-identical output for the same input is a load-bearing invariant —
+    tests in test_extractors.py and the end-to-end parity test in
+    test_backfill_embeddings.py lock it down.
     """
     passage = article + ' ' + ' '.join(comments[:20])
     model = get_embedding_model()
     return model.encode([passage], convert_to_numpy=True, normalize_embeddings=True)[0]
-
-
-def _compute_similarity_scores(article: str, comments: list[str], language: str):
-    """Shared first stage: passage embedding → cosine similarity vs taxonomy.
-
-    Returns (topics, candidate_labels, emb_scores).
-    """
-    topics, taxonomy_embeddings = get_taxonomy_embeddings(language)
-    candidate_labels = [t.labels.get(language) or t.label_en for t in topics]
-    passage_emb = _compute_passage_embedding(article, comments, language)
-    emb_scores = util.cos_sim(passage_emb, taxonomy_embeddings)[0].numpy()
-    return topics, candidate_labels, emb_scores
 
 
 class EmbeddingSimilarityExtractor(BaseExtractor):
@@ -66,9 +51,8 @@ class EmbeddingSimilarityExtractor(BaseExtractor):
 
     def extract(self, article: str, comments: list[str], language: str = 'en') -> list[TopicResult]:
         """Topics-only wrapper preserved for backwards compatibility. Direct
-        callers (like the legacy `pipeline.run` path before Task 4) get the
-        same shape they did before. New callers wanting the passage embedding
-        for persistence should use `extract_with_embedding`."""
+        callers get the same shape they did before. Callers needing the
+        passage embedding for persistence should use `extract_with_embedding`."""
         topics, _passage_emb = self.extract_with_embedding(article, comments, language)
         return topics
 
@@ -78,11 +62,6 @@ class EmbeddingSimilarityExtractor(BaseExtractor):
         here so the pipeline can persist it to ArticleEmbedding without
         recomputing. Bit-identical to _compute_passage_embedding(article,
         comments, language)."""
-        # We can't reuse _compute_similarity_scores wholesale because it
-        # returns (topics, candidate_labels, emb_scores), not the vector
-        # itself. So compute the vector via the shared helper and then
-        # replicate the scoring logic over emb_scores using the same
-        # taxonomy data.
         passage_emb = _compute_passage_embedding(article, comments, language)
         topics, taxonomy_embeddings = get_taxonomy_embeddings(language)
         candidate_labels = [t.labels.get(language) or t.label_en for t in topics]
