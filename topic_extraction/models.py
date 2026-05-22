@@ -66,6 +66,7 @@ class ArticleEmbedding(models.Model):
         indexes = [
             models.Index(fields=['platform', 'language', 'embedding_model_name']),
         ]
+        ordering = ['-computed_at']
 
     def __str__(self):
         return f'{self.platform}/{self.article_id}'
