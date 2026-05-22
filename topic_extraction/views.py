@@ -130,3 +130,56 @@ class TopicsListingView(views.APIView):
         response['ETag'] = etag
         response['Cache-Control'] = 'public, max-age=300'
         return response
+
+
+class ArticleSimilarityView(views.APIView):
+    """GET /api/articles/{platform}/{article_id}/similar?k=N&topic_slug=X
+
+    Returns up to k articles similar to (platform, article_id), filtered to
+    the same (platform, language) bucket. See similarity.py docstring and
+    docs/superpowers/specs/2026-05-21-article-similarity-design.md section 5
+    for the full contract.
+    """
+
+    def get(self, request, platform, article_id):
+        # Parse and validate k.
+        try:
+            k = int(request.query_params.get('k', 10))
+        except (TypeError, ValueError):
+            return Response({'error': 'k must be an integer'}, status=status.HTTP_400_BAD_REQUEST)
+        if k <= 0 or k > 100:
+            return Response(
+                {'error': 'k must be between 1 and 100'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        topic_slug = request.query_params.get('topic_slug') or None
+
+        from topic_extraction.similarity import (
+            find_similar, SourceNotFoundError, UnknownTopicSlugError,
+        )
+        try:
+            results = find_similar(platform, article_id, k=k, topic_slug=topic_slug)
+        except SourceNotFoundError:
+            return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
+        except UnknownTopicSlugError as e:
+            return Response(
+                {'error': f'Unknown topic_slug: {e.args[0]!r}'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'platform': platform,
+            'article_id': article_id,
+            'count': len(results),
+            'results': [
+                {
+                    'platform': r.platform,
+                    'article_id': r.article_id,
+                    'language': r.language,
+                    'raw_score': r.raw_score,
+                    'z_score': r.z_score,
+                }
+                for r in results
+            ],
+        })

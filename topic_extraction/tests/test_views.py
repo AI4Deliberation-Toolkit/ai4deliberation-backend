@@ -190,3 +190,84 @@ class TopicsListingViewTest(TestCase):
         response = self.client.get('/api/topics')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['language'], 'en')
+
+
+class ArticleSimilarityViewTest(TestCase):
+    def setUp(self):
+        call_command('seed_taxonomy')
+        # Source + 2 candidates in opengov/en bucket.
+        from topic_extraction.models import ArticleEmbedding
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='src', language='en',
+            vector=[1.0, 0.0], embedding_model_name='mpnet',
+        )
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='c1', language='en',
+            vector=[0.9, 0.1], embedding_model_name='mpnet',
+        )
+        ArticleEmbedding.objects.create(
+            platform='opengov', article_id='c2', language='en',
+            vector=[0.5, 0.5], embedding_model_name='mpnet',
+        )
+
+    def test_happy_path_returns_ranked_results(self):
+        response = self.client.get('/api/articles/opengov/src/similar?k=10')
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['platform'], 'opengov')
+        self.assertEqual(data['article_id'], 'src')
+        self.assertEqual(data['count'], 2)
+        self.assertEqual(len(data['results']), 2)
+        # Closer match first.
+        self.assertEqual(data['results'][0]['article_id'], 'c1')
+        # Required fields per result.
+        first = data['results'][0]
+        self.assertIn('platform', first)
+        self.assertIn('article_id', first)
+        self.assertIn('language', first)
+        self.assertIn('raw_score', first)
+        self.assertIn('z_score', first)
+
+    def test_missing_source_returns_404(self):
+        response = self.client.get('/api/articles/opengov/does-not-exist/similar')
+        self.assertEqual(response.status_code, 404)
+
+    def test_k_zero_returns_400(self):
+        response = self.client.get('/api/articles/opengov/src/similar?k=0')
+        self.assertEqual(response.status_code, 400)
+
+    def test_k_negative_returns_400(self):
+        response = self.client.get('/api/articles/opengov/src/similar?k=-1')
+        self.assertEqual(response.status_code, 400)
+
+    def test_k_too_large_returns_400(self):
+        response = self.client.get('/api/articles/opengov/src/similar?k=101')
+        self.assertEqual(response.status_code, 400)
+
+    def test_k_non_integer_returns_400(self):
+        response = self.client.get('/api/articles/opengov/src/similar?k=abc')
+        self.assertEqual(response.status_code, 400)
+
+    def test_unknown_topic_slug_returns_400(self):
+        response = self.client.get('/api/articles/opengov/src/similar?topic_slug=not-a-real-slug')
+        self.assertEqual(response.status_code, 400)
+
+    def test_default_k_is_10(self):
+        # No k param — should still return what's available (only 2 candidates here).
+        response = self.client.get('/api/articles/opengov/src/similar')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['count'], 2)
+
+    def test_url_does_not_shadow_topics_article(self):
+        # Sanity: /api/topics/article/<id> still works (Phase 1 endpoint).
+        # This test catches any URL pattern collision.
+        from topic_extraction.models import ArticleTopic
+        ArticleTopic.objects.create(
+            article_id='top-1', platform='opengov', language='el',
+            language_source='detected',
+            raw_topics=[{'label': 'x', 'score': 0.5}],
+            normalized=[{'topic_id': 'education_policy', 'score': 0.5}],
+            backend='embedding', taxonomy_version='test',
+        )
+        response = self.client.get('/api/topics/article/top-1')
+        self.assertEqual(response.status_code, 200)
