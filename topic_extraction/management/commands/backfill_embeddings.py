@@ -126,6 +126,20 @@ class Command(BaseCommand):
         except FileNotFoundError as e:
             raise CommandError(f'Source file not found: {e}')
 
+        # Silent-no-op detector: when iteration found articles but none had a
+        # matching ArticleTopic, the most likely cause is an article_id format
+        # mismatch between the ingestor's synthesis and what API clients store
+        # in ArticleTopic. Surface explicitly so the operator doesn't mistake
+        # a successful exit for a successful backfill.
+        if created + updated == 0 and skipped_no_articletopic > 0:
+            self.stderr.write(
+                'NOTE: 0 ArticleTopic rows matched any iterated article. '
+                'If you expected matches, verify article_id format alignment '
+                f'between the {source_name!r} ingestor (which synthesizes its '
+                'own canonical ids) and the article_ids that API clients have '
+                'been writing to ArticleTopic.'
+            )
+
         self.stdout.write(self.style.SUCCESS(
             f'Done. Created: {created}, updated: {updated}, '
             f'skipped (no ArticleTopic): {skipped_no_articletopic}, '

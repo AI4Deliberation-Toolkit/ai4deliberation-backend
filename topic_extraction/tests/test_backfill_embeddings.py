@@ -245,3 +245,69 @@ class BackfillPerRowExceptionTest(BackfillEmbeddingsBaseTest):
         # Failure was logged to stderr.
         self.assertIn('FAILED', err.getvalue())
         self.assertIn('a2', err.getvalue())
+
+
+class BackfillZeroMatchesWarningTest(TestCase):
+    """When iteration yields articles but no ArticleTopic rows match, surface
+    a NOTE to stderr — most likely cause is an article_id format mismatch
+    between the ingestor's synthesis and what API clients have written."""
+
+    def test_warns_when_iterated_articles_but_zero_match(self):
+        # No ArticleTopic rows exist. Ingestor yields 2 articles.
+        mock_ingestor_module = MagicMock()
+        mock_ingestor_module.iter_articles.return_value = iter([
+            {'platform': 'opengov', 'article_id': 'a1', 'article': 'x', 'comments': []},
+            {'platform': 'opengov', 'article_id': 'a2', 'article': 'y', 'comments': []},
+        ])
+
+        out = io.StringIO()
+        err = io.StringIO()
+        with patch('topic_extraction.management.commands.backfill_embeddings._get_ingestor',
+                   return_value=mock_ingestor_module):
+            call_command('backfill_embeddings', '--source', 'opengov',
+                         stdout=out, stderr=err)
+
+        stderr_text = err.getvalue()
+        self.assertIn('NOTE', stderr_text)
+        self.assertIn('0 ArticleTopic rows matched', stderr_text)
+        self.assertIn("'opengov'", stderr_text)
+        self.assertIn('Created: 0', out.getvalue())
+        self.assertIn('skipped (no ArticleTopic): 2', out.getvalue())
+
+    def test_no_warning_when_at_least_one_match(self):
+        # One ArticleTopic exists; one match expected → no warning.
+        ArticleTopic.objects.create(
+            article_id='a1', platform='opengov', language='el',
+            language_source='detected',
+            raw_topics=[], normalized=[],
+            backend='embedding_similarity', taxonomy_version='test',
+        )
+        mock_ingestor_module = MagicMock()
+        mock_ingestor_module.iter_articles.return_value = iter([
+            {'platform': 'opengov', 'article_id': 'a1', 'article': 'x', 'comments': []},
+        ])
+
+        def fake_emb(article, comments, language):
+            return np.array([0.1, 0.2, 0.3])
+
+        err = io.StringIO()
+        with patch('topic_extraction.management.commands.backfill_embeddings._get_ingestor',
+                   return_value=mock_ingestor_module):
+            with patch('topic_extraction.management.commands.backfill_embeddings._compute_passage_embedding',
+                       side_effect=fake_emb):
+                call_command('backfill_embeddings', '--source', 'opengov', stderr=err)
+
+        self.assertNotIn('NOTE', err.getvalue())
+
+    def test_no_warning_when_zero_iterated(self):
+        # Ingestor yields nothing → zero matches AND zero skips → no warning
+        # (warning condition requires skipped_no_articletopic > 0).
+        mock_ingestor_module = MagicMock()
+        mock_ingestor_module.iter_articles.return_value = iter([])
+
+        err = io.StringIO()
+        with patch('topic_extraction.management.commands.backfill_embeddings._get_ingestor',
+                   return_value=mock_ingestor_module):
+            call_command('backfill_embeddings', '--source', 'opengov', stderr=err)
+
+        self.assertNotIn('NOTE', err.getvalue())
