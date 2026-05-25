@@ -144,6 +144,11 @@ LLM_MODEL_NAME = config('LLM_MODEL_NAME', default='Qwen/Qwen2.5-3B-Instruct')
 EMBEDDING_THRESHOLD = float(config('EMBEDDING_THRESHOLD', default='0.35'))
 EMBEDDING_Z_THRESHOLD = float(config('EMBEDDING_Z_THRESHOLD', default='1.0'))
 
+# Legacy /api/categorize-text/ endpoint (cardiffnlp). Defaults on for dev so
+# existing flows keep working; staging overrides to False so the ~2.2 GB
+# cardiffnlp model never downloads on the staging host.
+ENABLE_LEGACY_CATEGORIZE = True
+
 # Topic extraction — language coverage
 TOPIC_LANGUAGES = ['en', 'el', 'de']
 DEFAULT_LANGUAGE = 'en'
