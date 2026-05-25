@@ -438,10 +438,17 @@ def extract_topics_single_article(
 # Zero-shot classifier
 # ========================
 
-classifier = pipeline(
-    "zero-shot-classification",
-    model="joeddav/xlm-roberta-large-xnli",
-)
+_classifier = None
+
+
+def get_classifier():
+    global _classifier
+    if _classifier is None:
+        _classifier = pipeline(
+            "zero-shot-classification",
+            model="joeddav/xlm-roberta-large-xnli",
+        )
+    return _classifier
 
 
 def extract_topics_zero_shot(article_text: str, threshold: float = 0.3):
@@ -449,7 +456,7 @@ def extract_topics_zero_shot(article_text: str, threshold: float = 0.3):
     Extract topics from a single article using zero-shot classification.
     Returns a list of {topic, score} dictionaries.
     """
-    raw = classifier(
+    raw = get_classifier()(
         article_text,
         CANDIDATE_TOPICS,
         multi_label=True,
