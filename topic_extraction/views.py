@@ -12,6 +12,20 @@ REQUIRED_FIELDS = ('article_id', 'platform', 'article')
 
 
 def _serialize_normalized(normalized, include_labels: bool, language: str):
+    """Project each normalized item to the wire shape.
+
+    With include_labels=True each item gains its OWN localized label and its
+    parent's slug — but NOT the parent's localized label. Clients that need to
+    render a parent label (e.g. the WP plugin's hierarchy view) currently must
+    join the parent slug against /api/topics. ai4d-topics-wp v0.1.3 does this
+    join client-side.
+
+    Deferred enhancement: also denormalize parent_label here when
+    include_labels=True, so any client can render a parent label without a
+    second taxonomy call. Tradeoff: each leaf carries its parent's label
+    string (cheap, but mildly redundant across leaves sharing a parent). Worth
+    revisiting once a second consumer beyond the WP plugin appears.
+    """
     if not include_labels:
         return normalized
     slugs = [n['topic_id'] for n in normalized]
