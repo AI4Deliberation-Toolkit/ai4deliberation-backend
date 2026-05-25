@@ -130,7 +130,7 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-HUGGING_TOKEN = config('HUGGING_TOKEN')
+HUGGING_TOKEN = config('HUGGING_TOKEN', default='')
 
 # Topic extraction settings
 # Default to the empirically-validated extraction backend (mpnet + per-article
