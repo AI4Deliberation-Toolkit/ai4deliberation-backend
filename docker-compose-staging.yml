@@ -10,6 +10,7 @@ services:
     volumes:
       - static_volume:/usr/src/app/staticfiles/
       - media_volume:/usr/src/app/media/
+      - hf_cache:/root/.cache/huggingface
       - .env:/usr/src/app/.env
     environment:
       DJANGO_SETTINGS_MODULE: ai4deliberation_backend.settings.staging
@@ -43,3 +44,4 @@ volumes:
   static_volume:
   media_volume:
   db_volume:
+  hf_cache:
