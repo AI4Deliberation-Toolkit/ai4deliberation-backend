@@ -4,8 +4,6 @@ from decouple import config
 
 SECRET_KEY = config('SECRET_KEY')
 
-ENABLE_LEGACY_CATEGORIZE = False
-
 POSTGRES_USER = config('POSTGRES_USER')
 POSTGRES_PASSWORD = config('POSTGRES_PASSWORD')
 POSTGRES_PORT = config('POSTGRES_PORT')

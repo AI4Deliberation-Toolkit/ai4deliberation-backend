@@ -41,8 +41,6 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
-    'ai_tools',
-    'topic_extraction',
 ]
 
 MIDDLEWARE = [
@@ -130,26 +128,3 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
-HUGGING_TOKEN = config('HUGGING_TOKEN', default='')
-
-# Topic extraction settings
-# Default to the empirically-validated extraction backend (mpnet + per-article
-# z-score normalisation). The full 'embedding' extractor adds zero-shot NLI
-# rescue but runs ~10x slower; it remains available via the EXTRACTION_BACKEND
-# env var override for cases where the slower signal is wanted.
-EXTRACTION_BACKEND = config('EXTRACTION_BACKEND', default='embedding_similarity')
-EMBEDDING_MODEL_NAME = config('EMBEDDING_MODEL_NAME', default='sentence-transformers/paraphrase-multilingual-mpnet-base-v2')
-ZERO_SHOT_MODEL_NAME = config('ZERO_SHOT_MODEL_NAME', default='MoritzLaurer/mDeBERTa-v3-base-mnli-xnli')
-LLM_MODEL_NAME = config('LLM_MODEL_NAME', default='Qwen/Qwen2.5-3B-Instruct')
-EMBEDDING_THRESHOLD = float(config('EMBEDDING_THRESHOLD', default='0.35'))
-EMBEDDING_Z_THRESHOLD = float(config('EMBEDDING_Z_THRESHOLD', default='1.0'))
-
-# Legacy /api/categorize-text/ endpoint (cardiffnlp). Defaults on for dev so
-# existing flows keep working; staging overrides to False so the ~2.2 GB
-# cardiffnlp model never downloads on the staging host.
-ENABLE_LEGACY_CATEGORIZE = True
-
-# Topic extraction — language coverage
-TOPIC_LANGUAGES = ['en', 'el', 'de']
-DEFAULT_LANGUAGE = 'en'
-LANG_DETECT_MIN_CHARS = 30
