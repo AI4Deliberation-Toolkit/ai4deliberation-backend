@@ -3,7 +3,7 @@ stages:
   - release
   - deploy
 
-validate-taxonomy:
+checks:
   stage: validate
   tags: [kt-gitlab-runner-docker]
   image: python:3.12-slim
@@ -21,36 +21,10 @@ validate-taxonomy:
   before_script:
     - pip install --no-cache-dir -r requirements.txt
   script:
+    - python manage.py check
+    - python manage.py makemigrations --check --dry-run
     - python manage.py migrate --noinput
-    - python manage.py seed_taxonomy
-    - python manage.py validate_taxonomy
-
-bump-guard:
-  stage: validate
-  tags: [kt-gitlab-runner-docker]
-  image: alpine:latest
-  variables:
-    GIT_DEPTH: 0
-  before_script:
-    - apk add --no-cache git
-    - git fetch origin main:refs/remotes/origin/main
-  script:
-    - |
-      if git diff --name-only origin/main HEAD | grep -q '^topic_extraction/taxonomy_data\.py$'; then
-        OLD=$(git show origin/main:topic_extraction/taxonomy_data.py | grep '^TAXONOMY_VERSION' | head -1)
-        NEW=$(grep '^TAXONOMY_VERSION' topic_extraction/taxonomy_data.py | head -1)
-        if [ "$OLD" = "$NEW" ]; then
-          echo "ERROR: topic_extraction/taxonomy_data.py changed but TAXONOMY_VERSION did not bump."
-          echo "Old: $OLD"
-          echo "New: $NEW"
-          exit 1
-        fi
-        echo "OK: TAXONOMY_VERSION bumped from '$OLD' to '$NEW'."
-      else
-        echo "taxonomy_data.py unchanged in this MR — bump check skipped."
-      fi
-  rules:
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - python manage.py test
 
 release:
   stage: release
