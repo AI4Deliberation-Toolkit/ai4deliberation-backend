@@ -5,7 +5,7 @@ services:
     build:
       context: .
       dockerfile: ./docker/web/Dockerfile
-    restart: always
+    restart: unless-stopped
     command: gunicorn -w 4 -b 0.0.0.0:8000 ai4deliberation_backend.wsgi:application --timeout 300
     volumes:
       - static_volume:/usr/src/app/staticfiles/
@@ -20,6 +20,7 @@ services:
   db:
     container_name: ai4deliberation-back-db
     image: postgres:17.6
+    restart: unless-stopped
     env_file:
       - .env
     volumes:
@@ -29,6 +30,7 @@ services:
   nginx:
     container_name: ai4deliberation-back-nginx
     image: git.konnektable.com:5050/rnd/rnds2025/ai4deliberation-backend:nginx
+    restart: unless-stopped
     build:
       context: .
       dockerfile: ./docker/nginx/Dockerfile
