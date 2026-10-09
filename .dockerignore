@@ -48,3 +48,12 @@ LICENSE
 .idea/
 .vscode/
 node_modules/
+
+# Local-only, gitignored material (absent in CI clones; keep local builds identical)
+resources/
+scripts/
+CLAUDE.md
+CLAUDE.local.md
+*.local.md
+Pipfile
+Pipfile.lock

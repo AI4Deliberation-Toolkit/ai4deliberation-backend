@@ -1,7 +1,9 @@
 """Keeps the gateway thin: no ML/NLP imports may creep back into this repo."""
 import ast
+import re
 from pathlib import Path
 
+from django.core.management import get_commands
 from django.test import SimpleTestCase
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -12,6 +14,14 @@ BANNED_IMPORTS = {
     'numpy', 'openpyxl', 'pandas', 'pyarrow', 'sentence_transformers', 'sentencepiece',
     'sklearn', 'tensorflow', 'tf_keras', 'torch', 'torchaudio', 'torchvision',
     'transformers', 'umap', 'xlrd',
+}
+
+# Distribution names (requirements.txt spelling) of the old NLP stack.
+BANNED_REQUIREMENTS = {
+    'accelerate', 'bertopic', 'fastapi', 'hdbscan', 'huggingface-hub', 'langdetect',
+    'numpy', 'openpyxl', 'pandas', 'pyarrow', 'scikit-learn', 'sentence-transformers',
+    'sentencepiece', 'tensorflow', 'tensorflow-cpu', 'tf-keras', 'torch', 'torchaudio',
+    'torchvision', 'transformers', 'umap-learn', 'xlrd',
 }
 
 # Gitignored, local-only folders that may hold old experiment code.
@@ -44,3 +54,18 @@ class DependencyFenceTests(SimpleTestCase):
                 if module.split('.')[0] in BANNED_IMPORTS:
                     offenders.append(f'{path.relative_to(ROOT)}:{lineno} imports {module}')
         self.assertEqual(offenders, [], 'ML imports found:\n' + '\n'.join(offenders))
+
+    def test_requirements_have_no_ml_packages(self):
+        names = []
+        for line in (ROOT / 'requirements.txt').read_text(encoding='utf-8').splitlines():
+            line = line.split('#', 1)[0].strip()
+            if line:
+                names.append(re.split(r'[<>=!~\[;\s]', line, maxsplit=1)[0].lower())
+        self.assertEqual(sorted(set(names) & BANNED_REQUIREMENTS), [])
+
+    def test_entrypoint_only_calls_existing_commands(self):
+        script = (ROOT / 'docker' / 'web' / 'entrypoint.sh').read_text(encoding='utf-8')
+        called = re.findall(r'manage\.py\s+([a-z_]+)', script)
+        self.assertTrue(called, 'entrypoint no longer calls manage.py at all')
+        unknown = sorted(set(called) - set(get_commands()))
+        self.assertEqual(unknown, [], f'entrypoint calls unknown management commands: {unknown}')
