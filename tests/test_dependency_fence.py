@@ -25,7 +25,7 @@ BANNED_REQUIREMENTS = {
 }
 
 # Gitignored, local-only folders that may hold old experiment code.
-SKIPPED_DIRS = {'docs', 'resources', 'scripts', 'staticfiles', 'media', 'venv', 'node_modules'}
+SKIPPED_DIRS = {'docs', 'resources', 'scripts', 'staticfiles', 'media', 'venv', 'env', 'myenv', 'ENV', 'node_modules'}
 
 
 def _project_python_files():

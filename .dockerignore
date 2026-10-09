@@ -57,3 +57,5 @@ CLAUDE.local.md
 *.local.md
 Pipfile
 Pipfile.lock
+.superpowers/
+.claude/
