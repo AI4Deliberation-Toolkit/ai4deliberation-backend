@@ -1,6 +1,8 @@
 """Keeps the gateway thin: no ML/NLP imports may creep back into this repo."""
 import ast
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from django.core.management import get_commands
@@ -24,16 +26,39 @@ BANNED_REQUIREMENTS = {
     'torchvision', 'transformers', 'umap-learn', 'xlrd',
 }
 
-# Gitignored, local-only folders that may hold old experiment code.
+# Gitignored, local-only top-level folders that may hold old experiment code.
 SKIPPED_DIRS = {'docs', 'resources', 'scripts', 'staticfiles', 'media', 'venv', 'env', 'myenv', 'ENV', 'node_modules'}
 
 
-def _project_python_files():
-    for path in ROOT.rglob('*.py'):
-        parts = path.relative_to(ROOT).parts
-        if any(part.startswith('.') or part in SKIPPED_DIRS for part in parts):
+def _project_python_files(root=ROOT):
+    for dirpath, dirnames, filenames in os.walk(root):
+        top_level = Path(dirpath) == Path(root)
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith('.') and not (top_level and d in SKIPPED_DIRS)
+        ]
+        for name in filenames:
+            if name.endswith('.py'):
+                yield Path(dirpath) / name
+
+
+def _requirement_names(text):
+    for line in text.splitlines():
+        line = re.sub(r'(?:^|\s)#.*', '', line).strip()
+        if not line:
             continue
-        yield path
+        egg = re.search(r'[#&]egg=([^&\s]+)', line)
+        if egg:
+            name = egg.group(1)
+        elif line.startswith('-'):
+            continue
+        else:
+            name = re.split(r'[<>=!~\[;@\s]', line, maxsplit=1)[0]
+        yield re.sub(r'[-_.]+', '-', name).lower()
+
+
+def _management_commands(script):
+    return re.findall(r'(?:manage\.py|django-admin|-m\s+django)\s+([a-z_]+)', script)
 
 
 def _imported_modules(tree):
@@ -56,16 +81,49 @@ class DependencyFenceTests(SimpleTestCase):
         self.assertEqual(offenders, [], 'ML imports found:\n' + '\n'.join(offenders))
 
     def test_requirements_have_no_ml_packages(self):
-        names = []
-        for line in (ROOT / 'requirements.txt').read_text(encoding='utf-8').splitlines():
-            line = line.split('#', 1)[0].strip()
-            if line:
-                names.append(re.split(r'[<>=!~\[;\s]', line, maxsplit=1)[0].lower())
-        self.assertEqual(sorted(set(names) & BANNED_REQUIREMENTS), [])
+        names = set(_requirement_names((ROOT / 'requirements.txt').read_text(encoding='utf-8')))
+        self.assertEqual(sorted(names & BANNED_REQUIREMENTS), [])
 
     def test_entrypoint_only_calls_existing_commands(self):
         script = (ROOT / 'docker' / 'web' / 'entrypoint.sh').read_text(encoding='utf-8')
-        called = re.findall(r'manage\.py\s+([a-z_]+)', script)
-        self.assertTrue(called, 'entrypoint no longer calls manage.py at all')
+        called = _management_commands(script)
+        self.assertTrue(called, 'entrypoint no longer calls any management commands')
         unknown = sorted(set(called) - set(get_commands()))
         self.assertEqual(unknown, [], f'entrypoint calls unknown management commands: {unknown}')
+
+    def test_requirement_name_parsing(self):
+        sample = """\
+scikit_learn==1.6.1
+Huggingface_Hub>=0.2
+sentence.transformers
+-e git+https://example.com/x.git#egg=transformers
+-e git+https://example.com/y.git#subdirectory=py&egg=hdbscan
+torch @ https://example.com/torch.whl
+django==5.2.8  # inline comment
+# a full-line comment
+--index-url https://example.com/simple
+
+"""
+        self.assertEqual(
+            set(_requirement_names(sample)),
+            {'scikit-learn', 'huggingface-hub', 'sentence-transformers', 'transformers', 'hdbscan', 'torch', 'django'},
+        )
+
+    def test_fence_skips_local_dirs_only_at_top_level(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for rel in ('scripts/top.py', '.hidden/h.py', 'pkg/scripts/nested.py', 'pkg/mod.py'):
+                f = root / rel
+                f.parent.mkdir(parents=True, exist_ok=True)
+                f.write_text('')
+            found = {Path(p).relative_to(root).as_posix() for p in _project_python_files(root)}
+        self.assertEqual(found, {'pkg/scripts/nested.py', 'pkg/mod.py'})
+
+    def test_management_command_parsing(self):
+        script = (
+            'python3 manage.py migrate --noinput\n'
+            'django-admin seed_taxonomy\n'
+            'python -m django validate_taxonomy\n'
+            'exec "$@"\n'
+        )
+        self.assertEqual(_management_commands(script), ['migrate', 'seed_taxonomy', 'validate_taxonomy'])

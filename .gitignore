@@ -149,6 +149,8 @@ GitHub.sublime-settings
 .pypirc
 
 CLAUDE.md
+CLAUDE.local.md
+*.local.md
 
 resources/
 
