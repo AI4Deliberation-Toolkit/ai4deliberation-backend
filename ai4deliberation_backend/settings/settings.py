@@ -11,7 +11,7 @@ https://docs.djangoproject.com/en/4.2/ref/settings/
 """
 import os
 from pathlib import Path
-from decouple import config
+from decouple import Csv, config
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
@@ -24,10 +24,12 @@ BASE_DIR = Path(__file__).resolve().parent.parent.parent
 SECRET_KEY = config('SECRET_KEY', default='django-insecure-cml!8-c&6posjqychucro02y&6d3(=!l^5-d_#+8$66(jfj3uz')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = config('DEBUG', default=True, cast=bool)
 
+# Dev and tests only; staging reads ALLOWED_HOSTS from the environment.
 ALLOWED_HOSTS = ['*']
 
+# Dev only; staging closes CORS (the gateway is server-to-server).
 CORS_ALLOW_ALL_ORIGINS = True
 
 # Application definition
@@ -128,3 +130,18 @@ STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 
+
+# Unified API gateway
+
+# Comma-separated Fernet keys; the first one encrypts, all of them decrypt (rotation-ready).
+# This default is a fixed dev/test key; staging requires its own.
+GATEWAY_ENCRYPTION_KEYS = config(
+    'GATEWAY_ENCRYPTION_KEYS', default='fptFnIu8wSj3xFAyQfVkR4zryBp2Md99CCp7VD9yR94=', cast=Csv(),
+)
+GATEWAY_ENABLE_STUB = config('GATEWAY_ENABLE_STUB', default=True, cast=bool)
+GATEWAY_STUB_KEY = config('GATEWAY_STUB_KEY', default='')
+CALL_LOG_RETENTION_DAYS = config('CALL_LOG_RETENTION_DAYS', default=180, cast=int)
+
+# Largest request body the gateway reads; larger ones get 413 REQUEST_TOO_LARGE (spec §4.1).
+# nginx's client_max_body_size stays the outer bound.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024

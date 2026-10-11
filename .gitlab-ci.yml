@@ -18,6 +18,9 @@ checks:
     POSTGRES_PORT: '5432'
     SECRET_KEY: ci-only-not-secret-do-not-use-in-prod
     DJANGO_SETTINGS_MODULE: ai4deliberation_backend.settings.staging
+    ALLOWED_HOSTS: localhost,127.0.0.1
+    # CI-only Fernet key; never used anywhere else.
+    GATEWAY_ENCRYPTION_KEYS: 'l5OuvDtJGhPdISI1hEgB_Y9kTItb2AaqCF5qa-MO2oM='
   before_script:
     - pip install --no-cache-dir -r requirements.txt
   script:
