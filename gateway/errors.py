@@ -19,6 +19,9 @@ TOOL_AUTH_FAILED = 'TOOL_AUTH_FAILED'
 TOOL_BAD_RESPONSE = 'TOOL_BAD_RESPONSE'
 TOOL_ERROR = 'TOOL_ERROR'
 INTERNAL = 'INTERNAL'
+# Log-only: stored on the CallLog row when the client disconnects mid-call (status 499). Never sent
+# to a caller (there is no one to send it to), so it is not in STATUS or MESSAGES.
+CLIENT_DISCONNECTED = 'CLIENT_DISCONNECTED'
 
 # TOOL_ERROR is deliberately absent from STATUS and MESSAGES: it is raised only via the adapter's
 # ToolError (source `tool`), whose status comes from `tool_error_status`.

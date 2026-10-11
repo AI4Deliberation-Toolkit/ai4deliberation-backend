@@ -44,10 +44,25 @@ def logged_metadata(metadata: dict) -> dict[str, str]:
     }
 
 
+# Strong references to in-flight inserts: the event loop keeps only weak ones, and a shielded
+# insert whose caller was cancelled has no other owner.
+_inserts: set[asyncio.Task] = set()
+
+
 async def write_call_log(record: CallRecord) -> None:
-    """Write the row, even if the client disconnects meanwhile. Never raises: the response must not change."""
+    """Write the row, even if the caller is cancelled meanwhile. Raises nothing but CancelledError:
+    the response must not change."""
+    task = asyncio.ensure_future(_insert(record))
+    _inserts.add(task)
+    task.add_done_callback(_inserts.discard)
+    await asyncio.shield(task)
+
+
+async def _insert(record: CallRecord) -> None:
+    # Handles its own failure: if the caller was cancelled, nobody else would see it
+    # (asyncio would report "Task exception was never retrieved" instead).
     try:
-        await asyncio.shield(CallLog.objects.acreate(**asdict(record)))
+        await CallLog.objects.acreate(**asdict(record))
     except Exception as exc:
         logger.warning('Call log row not written (request_id=%s): %s', record.request_id, type(exc).__name__)
 

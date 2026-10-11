@@ -1,13 +1,18 @@
+import asyncio
 import json
 from unittest import mock
 
 import httpx
-from django.db import DatabaseError
+from django.core.asgi import get_asgi_application
+from django.core.signals import request_finished, request_started
+from django.db import DatabaseError, close_old_connections
 from django.test import override_settings
 
 from gateway.adapters import ADAPTERS
 from gateway.models import CallLog
-from tests.gateway.support import UNKNOWN_KEY, BrokenAdapter, GatewayTestCase, load_fixture, reply_json
+from tests.gateway.support import (
+    UNKNOWN_KEY, BrokenAdapter, GatewayTestCase, capture_logs, load_fixture, reply_json,
+)
 
 
 class CallLogRowTests(GatewayTestCase):
@@ -146,3 +151,78 @@ class AccessLineTests(GatewayTestCase):
     async def test_other_routes_get_no_line(self):
         with self.assertNoLogs('gateway.access', 'INFO'):
             await self.async_client.get('/api/v1/health')
+
+
+class ClientDisconnectTests(GatewayTestCase):
+    """Django's ASGIHandler cancels the request task on http.disconnect; the call must still be logged.
+
+    The test client never sends http.disconnect, so these drive the real ASGI application."""
+
+    def setUp(self):
+        super().setUp()
+        self.make_stub_tool()
+
+    async def disconnect_while_hanging_in(self, where, headers=()):
+        """POST to the stub; `where` ('tool' or 'auth') never answers, and the client disconnects meanwhile."""
+        entered = asyncio.Event()
+
+        async def hang(*args, **kwargs):
+            entered.set()
+            await asyncio.Event().wait()  # only the cancellation ends this
+
+        class HangingTransport(httpx.AsyncBaseTransport):
+            async def handle_async_request(self, request):
+                await hang()
+
+        body = json.dumps({'input': {}}).encode()
+        messages = [{'type': 'http.request', 'body': body, 'more_body': False}]
+
+        async def receive():
+            if messages:
+                return messages.pop(0)
+            await entered.wait()  # the client goes away while the gateway is waiting
+            return {'type': 'http.disconnect'}
+
+        sent = []
+
+        async def send(message):
+            sent.append(message)
+
+        scope = {
+            'type': 'http', 'asgi': {'version': '3.0'}, 'http_version': '1.1', 'method': 'POST', 'scheme': 'http',
+            'path': '/api/v1/tools/stub/echo', 'raw_path': b'/api/v1/tools/stub/echo', 'query_string': b'',
+            'root_path': '', 'client': ['127.0.0.1', 1234], 'server': ['testserver', 80],
+            'headers': [(b'host', b'testserver'), (b'content-type', b'application/json'),
+                        (b'content-length', str(len(body)).encode()), *headers],
+        }
+        if where == 'tool':
+            patcher = mock.patch('gateway.http.get_client',
+                                 side_effect=lambda: httpx.AsyncClient(transport=HangingTransport()))
+        else:
+            patcher = mock.patch('gateway.auth.averify_key', hang)
+        app = get_asgi_application()
+        # As Django's test client does: the real handler's request signals would close the test's DB connection.
+        for signal in (request_started, request_finished):
+            signal.disconnect(close_old_connections)
+            self.addCleanup(signal.connect, close_old_connections)
+        with patcher, capture_logs('gateway.access') as access, capture_logs('') as everything_else:
+            await app(scope, receive, send)
+        self.assertTrue(entered.is_set())
+        self.assertEqual(sent, [])  # nothing is sent to a client that has gone
+        self.assertEqual([r.getMessage() for r in everything_else], [])  # no warning, no traceback
+        self.assertEqual(len(access), 1)
+        return access[0].getMessage().split(' ')
+
+    async def test_disconnect_during_the_tool_call_writes_a_499_row_and_access_line(self):
+        fields = await self.disconnect_while_hanging_in('tool', [(b'x-gateway-key', self.key.encode())])
+        row = await CallLog.objects.aget()
+        self.assertEqual((row.tool_id, row.operation, row.status, row.error_code, row.error_source),
+                         ('stub', 'echo', 499, 'CLIENT_DISCONNECTED', 'gateway'))
+        self.assertIsNotNone(row.tool_duration_ms)  # invoke's record was kept
+        self.assertGreaterEqual(row.duration_ms, row.tool_duration_ms)
+        self.assertEqual(fields[:5], [str(row.request_id), 'wp-site', 'stub', 'echo', '499'])
+
+    async def test_unauthenticated_disconnect_gets_the_access_line_only(self):
+        fields = await self.disconnect_while_hanging_in('auth', [(b'x-gateway-key', UNKNOWN_KEY.encode())])
+        self.assertEqual(await CallLog.objects.acount(), 0)
+        self.assertEqual(fields[1:5], ['-', 'stub', 'echo', '499'])

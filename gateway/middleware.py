@@ -2,8 +2,9 @@
 
 The middleware sees every request to the unified route, including those Ninja rejects before the
 view (401, 422, 413), with request.auth already set when auth passed. So it is the single place
-that writes both, and the stored status is always the status sent.
+that writes both, and the stored status is always the status sent (499 if the client disconnected first).
 """
+import asyncio
 import logging
 import time
 import uuid
@@ -13,12 +14,15 @@ from asgiref.sync import async_to_sync, iscoroutinefunction
 from django.utils.decorators import sync_and_async_middleware
 
 from gateway.calllog import new_record, write_call_log
-from gateway.errors import INTERNAL, INVALID_REQUEST, REQUEST_TOO_LARGE
+from gateway.errors import CLIENT_DISCONNECTED, INTERNAL, INVALID_REQUEST, REQUEST_TOO_LARGE
 
 access_logger = logging.getLogger('gateway.access')
 UNIFIED_ROUTE = 'gateway:call_tool'
 # Authenticated requests Ninja rejects before the view: status sent → error code stored.
 _REJECTED_BEFORE_VIEW = {413: REQUEST_TOO_LARGE, 422: INVALID_REQUEST}
+# nginx's convention for "the client closed the connection before the response": stored and
+# logged, never sent (there is no one left to send it to).
+CLIENT_DISCONNECTED_STATUS = 499
 
 
 @sync_and_async_middleware
@@ -27,7 +31,15 @@ def request_id_middleware(get_response):
     if iscoroutinefunction(get_response):
         async def middleware(request):
             started = _start(request)
-            response = await get_response(request)
+            try:
+                response = await get_response(request)
+            except asyncio.CancelledError:
+                # Django's ASGIHandler cancels the request task on http.disconnect: still log the call.
+                record = _log_call(request, CLIENT_DISCONNECTED_STATUS, started)
+                if record is not None:
+                    record.error_code, record.error_source = CLIENT_DISCONNECTED, 'gateway'
+                    await write_call_log(record)
+                raise
             record = _finish(request, response, started)
             if record is not None:
                 await write_call_log(record)  # shielded: a client disconnect doesn't cancel it
@@ -55,8 +67,13 @@ def _loggable(segment: str) -> str:
 
 
 def _finish(request, response, started: float):
-    """Set the header and, for the unified route, write the access line. Return the CallRecord to store, if any."""
+    """Set the header, then log the call. Return the CallRecord to store, if any."""
     response['X-Request-Id'] = request.request_id
+    return _log_call(request, response.status_code, started)
+
+
+def _log_call(request, status: int, started: float):
+    """For the unified route, write the access line with this status. Return the CallRecord to store, if any."""
     match = getattr(request, 'resolver_match', None)
     if match is None or match.view_name != UNIFIED_ROUTE:
         return None
@@ -64,13 +81,13 @@ def _finish(request, response, started: float):
     api_key = getattr(request, 'auth', None)  # set by Ninja only after successful auth
     tool_id, operation = match.kwargs.get('tool_id', ''), match.kwargs.get('operation', '')
     access_logger.info('%s %s %s %s %s %d', request.request_id, api_key.platform.slug if api_key else '-',
-                       _loggable(tool_id), _loggable(operation), response.status_code, duration_ms)
+                       _loggable(tool_id), _loggable(operation), status, duration_ms)
     if api_key is None:
         return None  # unauthenticated: the access line only, never a row (spec §8.1)
     record = getattr(request, 'call_record', None)
     if record is None:  # Ninja rejected it before invoke ran
         record = new_record(request, tool_id, operation)
-        record.error_code = _REJECTED_BEFORE_VIEW.get(response.status_code, INTERNAL)
-    record.status = response.status_code
+        record.error_code = _REJECTED_BEFORE_VIEW.get(status, INTERNAL)
+    record.status = status
     record.duration_ms = duration_ms
     return record

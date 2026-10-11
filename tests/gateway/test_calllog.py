@@ -1,3 +1,4 @@
+import asyncio
 import io
 import uuid
 from datetime import timedelta
@@ -49,6 +50,32 @@ class WriteCallLogTests(TestCase):
             with self.assertLogs('gateway.calllog', 'WARNING') as logs:
                 await write_call_log(make_record(self.platform))
         self.assertIn('DatabaseError', logs.output[0])
+
+    async def test_failure_after_the_caller_was_cancelled_is_still_our_warning(self):
+        # The shielded insert outlives its cancelled caller; its failure must not become asyncio's
+        # "Task exception was never retrieved".
+        started, release = asyncio.Event(), asyncio.Event()
+
+        async def failing_insert(**fields):
+            started.set()
+            await release.wait()
+            raise DatabaseError('db down')
+
+        record = make_record(self.platform)
+        with mock.patch.object(CallLog.objects, 'acreate', failing_insert):
+            with self.assertLogs('gateway.calllog', 'WARNING') as logs:
+                caller = asyncio.ensure_future(write_call_log(record))
+                await started.wait()
+                caller.cancel()
+                with self.assertRaises(asyncio.CancelledError):
+                    await caller
+                release.set()
+                for _ in range(100):  # let the shielded insert run to its end
+                    if logs.records:
+                        break
+                    await asyncio.sleep(0)
+        self.assertEqual(logs.output, [
+            f'WARNING:gateway.calllog:Call log row not written (request_id={record.request_id}): DatabaseError'])
 
 
 class PurgeCallLogsTests(TestCase):
