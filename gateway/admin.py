@@ -1,10 +1,12 @@
-from django.contrib import admin
+from django import forms
+from django.contrib import admin, messages
 from django.template.response import TemplateResponse
 from django.utils import timezone
 from django.utils.cache import add_never_cache_headers
 
+from gateway.adapters import ADAPTERS
 from gateway.keys import assign_new_key
-from gateway.models import ApiKey, Platform
+from gateway.models import ApiKey, Platform, Tool
 
 
 @admin.register(Platform)
@@ -53,3 +55,51 @@ class ApiKeyAdmin(admin.ModelAdmin):
     def revoke_keys(self, request, queryset):
         count = queryset.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
         self.message_user(request, f'Revoked {count} key(s).')
+
+
+class ToolAdminForm(forms.ModelForm):
+    new_tool_key = forms.CharField(
+        label='Tool key', required=False, widget=forms.PasswordInput(render_value=False),
+        help_text='Write-only. Leave blank to keep the current key.',
+    )
+    clear_tool_key = forms.BooleanField(label='Clear tool key', required=False)
+    adapter = forms.ChoiceField(choices=())
+
+    class Meta:
+        model = Tool
+        fields = (
+            'tool_id', 'name', 'description', 'docs_url', 'base_url', 'depth', 'adapter', 'operations',
+            'key_header', 'gateway_only', 'timeout_seconds', 'health_path', 'enabled',
+        )
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['adapter'].choices = [(name, name) for name in sorted(ADAPTERS)]
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get('new_tool_key') and cleaned.get('clear_tool_key'):
+            raise forms.ValidationError('Either set a new key or clear it, not both.')
+        return cleaned
+
+
+@admin.register(Tool)
+class ToolAdmin(admin.ModelAdmin):
+    form = ToolAdminForm
+    list_display = ('tool_id', 'name', 'depth', 'adapter', 'enabled', 'key_status', 'reachability')
+    list_filter = ('enabled', 'depth')
+    search_fields = ('tool_id', 'name')
+
+    @admin.display(description='Tool key')
+    def key_status(self, obj):
+        return 'set' if obj.has_tool_key else 'not set'
+
+    def save_model(self, request, obj, form, change):
+        if form.cleaned_data.get('clear_tool_key'):
+            obj.clear_tool_key()
+        elif form.cleaned_data.get('new_tool_key'):
+            obj.set_tool_key(form.cleaned_data['new_tool_key'])
+        super().save_model(request, obj, form, change)
+        if obj.uses_plain_http_off_loopback:
+            messages.warning(request, f'{obj.tool_id} uses plain http to a non-loopback host: '
+                                      f'its tool key travels unencrypted.')
