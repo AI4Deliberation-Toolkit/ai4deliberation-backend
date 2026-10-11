@@ -31,8 +31,9 @@ def _sensitive_headers() -> frozenset[str]:
 @functools.lru_cache(maxsize=16)
 def _header_value_re(names: frozenset[str]) -> re.Pattern:
     alternatives = '|'.join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    # A quoted value is masked to its closing quote, an unquoted one to the end of the line.
     return re.compile(
-        rf'''(?i)(?<![\w-])({alternatives})(["']?\s*[:=]\s*["']?)(?:(?:bearer|basic|token)\s+)?[^\s"',;}}]+'''
+        rf'''(?i)(?<![\w-])({alternatives})(["']?\s*[:=]\s*)(?:(?:bearer|basic|token)\s+)?(?:"[^"\n]*"?|'[^'\n]*'?|[^\n]*)'''
     )
 
 
@@ -67,11 +68,19 @@ def _redact(value):
 
 class RedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
-        record.msg = _redact(record.msg)
-        if isinstance(record.args, dict):
-            record.args = _redact_dict(record.args)
-        elif record.args:
-            record.args = tuple(_redact(arg) for arg in record.args)
+        if record.args:
+            # Format first, then redact: the header name may be in msg and its value in args.
+            try:
+                record.msg = redact_text(record.getMessage())
+                record.args = ()
+            except Exception:
+                record.msg = _redact(record.msg)
+                if isinstance(record.args, dict):
+                    record.args = _redact_dict(record.args)
+                else:
+                    record.args = tuple(_redact(arg) for arg in record.args)
+        else:
+            record.msg = _redact(record.msg)
         for name, value in list(vars(record).items()):
             if name not in ('msg', 'args') and isinstance(value, dict):
                 setattr(record, name, _redact_dict(value))

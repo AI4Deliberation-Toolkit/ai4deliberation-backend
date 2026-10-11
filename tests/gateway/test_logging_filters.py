@@ -1,3 +1,4 @@
+import io
 import logging
 import sys
 
@@ -37,6 +38,42 @@ class RedactionTests(SimpleTestCase):
         for text, secret in cases.items():
             with self.subTest(text=text):
                 self.assertNotIn(secret, filtered(text).getMessage())
+
+    def test_header_name_in_msg_and_value_in_args(self):
+        for msg, arg in (('Authorization: Bearer %s', KEY), ('Authorization: Bearer %s', 'RAWTOKEN123'),
+                         ('X-API-Key: %s', 'RAWKEY456')):
+            with self.subTest(msg=msg, arg=arg):
+                stream = io.StringIO()
+                handler = logging.StreamHandler(stream)
+                handler.addFilter(RedactingFilter())
+                errors = []
+                handler.handleError = errors.append
+                logger = logging.getLogger('test.fmt')
+                logger.propagate = False
+                logger.addHandler(handler)
+                try:
+                    logger.warning(msg, arg)
+                finally:
+                    logger.removeHandler(handler)
+                self.assertEqual(errors, [])
+                out = stream.getvalue()
+                self.assertNotIn(arg, out)
+                self.assertIn(REDACTED, out)
+
+    def test_bare_gateway_key_arg(self):
+        self.assertNotIn(KEY, filtered('key was %s', (KEY,)).getMessage())
+
+    def test_unquoted_values_are_masked_whole(self):
+        self.assertEqual(redact_text('X-User-Context: {"user_id": "42", "email": "a@b.c"}'),
+                         'X-User-Context: ' + REDACTED)
+        self.assertEqual(redact_text('X-User-Context: user 42 alice'), 'X-User-Context: ' + REDACTED)
+        self.assertEqual(redact_text('X-API-Key: abc def\nnext line'), 'X-API-Key: ' + REDACTED + '\nnext line')
+
+    def test_quoted_value_keeps_following_keys(self):
+        out = redact_text("{'x-api-key': 'abc def', 'other': 1}")
+        self.assertNotIn('abc', out)
+        self.assertNotIn('def', out)
+        self.assertIn("'other': 1", out)
 
     def test_dict_args(self):
         record = filtered('%(headers)s', ({'headers': {'X-API-Key': 'dict-secret'}},))
