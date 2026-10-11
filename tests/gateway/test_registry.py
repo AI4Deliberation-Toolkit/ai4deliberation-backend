@@ -46,7 +46,7 @@ class ToolValidationTests(TestCase):
     def test_base_url_rules(self):
         for bad in ('ftp://toolkit.example.org', 'https://toolkit.example.org/', 'https://toolkit.example.org?x=1',
                     'https://toolkit.example.org#frag', 'https://user:pw@toolkit.example.org', 'toolkit.example.org',
-                    '/relative'):
+                    '/relative', 'http://[::1', 'http://[bad]'):
             with self.subTest(base_url=bad):
                 self.assertRefused('base_url', base_url=bad)
 

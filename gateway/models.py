@@ -129,8 +129,12 @@ class Tool(models.Model):
         return None
 
     def _base_url_error(self):
-        parts = urlsplit(self.base_url)
-        if parts.scheme not in ('http', 'https') or not parts.hostname:
+        try:
+            parts = urlsplit(self.base_url)
+            hostname = parts.hostname  # also raises ValueError for e.g. "http://[bad]"
+        except ValueError:
+            return 'Use an absolute http:// or https:// URL.'
+        if parts.scheme not in ('http', 'https') or not hostname:
             return 'Use an absolute http:// or https:// URL.'
         if parts.username or parts.password:
             return 'Put credentials in the tool key, not in the URL.'
