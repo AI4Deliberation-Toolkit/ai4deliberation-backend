@@ -1,0 +1,8 @@
+{% extends "admin/base_site.html" %}
+
+{% block content %}
+<p><strong>This is the only time this key is shown.</strong> Copy it now and give it to
+{{ api_key.platform.name }} over a secure channel. Only its prefix and hash are stored.</p>
+<p><code id="issued-key">{{ issued_key }}</code></p>
+<p><a href="{% url 'admin:gateway_apikey_changelist' %}">Back to API keys</a></p>
+{% endblock %}
