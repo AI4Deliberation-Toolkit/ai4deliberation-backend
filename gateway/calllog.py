@@ -3,6 +3,8 @@ import asyncio
 import logging
 from dataclasses import asdict, dataclass
 
+from django.core.exceptions import RequestDataTooBig
+
 from gateway.errors import INTERNAL
 from gateway.models import CallLog
 
@@ -48,3 +50,19 @@ async def write_call_log(record: CallRecord) -> None:
         await asyncio.shield(CallLog.objects.acreate(**asdict(record)))
     except Exception as exc:
         logger.warning('Call log row not written (request_id=%s): %s', record.request_id, type(exc).__name__)
+
+
+def new_record(request, tool_id: str, operation: str) -> CallRecord:
+    """A record for an authenticated call to the unified route (`request.auth` must be set)."""
+    return CallRecord(
+        request_id=request.request_id, platform_id=request.auth.platform_id, key_prefix=request.auth.prefix,
+        # Path segments Ninja rejected can be longer than the 64-char columns.
+        tool_id=tool_id[:64], operation=operation[:64], request_bytes=_request_bytes(request),
+    )
+
+
+def _request_bytes(request) -> int:
+    try:
+        return len(request.body)
+    except RequestDataTooBig:  # over DATA_UPLOAD_MAX_MEMORY_SIZE: never read it
+        return int(request.META.get('CONTENT_LENGTH') or 0)

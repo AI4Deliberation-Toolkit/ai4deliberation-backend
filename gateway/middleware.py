@@ -1,8 +1,23 @@
-"""Request ID for every request (spec §3.7)."""
+"""Request ID for every request (spec §3.7); access line and CallLog row for unified calls (spec §8.1).
+
+The middleware sees every request to the unified route, including those Ninja rejects before the
+view (401, 422, 413), with request.auth already set when auth passed. So it is the single place
+that writes both, and the stored status is always the status sent.
+"""
+import logging
+import time
 import uuid
 
-from asgiref.sync import iscoroutinefunction
+from asgiref.sync import async_to_sync, iscoroutinefunction
 from django.utils.decorators import sync_and_async_middleware
+
+from gateway.calllog import new_record, write_call_log
+from gateway.errors import INTERNAL, INVALID_REQUEST, REQUEST_TOO_LARGE
+
+access_logger = logging.getLogger('gateway.access')
+UNIFIED_ROUTE = 'gateway:call_tool'
+# Authenticated requests Ninja rejects before the view: status sent → error code stored.
+_REJECTED_BEFORE_VIEW = {413: REQUEST_TOO_LARGE, 422: INVALID_REQUEST}
 
 
 @sync_and_async_middleware
@@ -10,14 +25,45 @@ def request_id_middleware(get_response):
     """Generate a UUID4 per request; never accept a caller-supplied one (deferred-decisions #10)."""
     if iscoroutinefunction(get_response):
         async def middleware(request):
-            request.request_id = str(uuid.uuid4())
+            started = _start(request)
             response = await get_response(request)
-            response['X-Request-Id'] = request.request_id
+            record = _finish(request, response, started)
+            if record is not None:
+                await write_call_log(record)  # shielded: a client disconnect doesn't cancel it
             return response
     else:
         def middleware(request):
-            request.request_id = str(uuid.uuid4())
+            started = _start(request)
             response = get_response(request)
-            response['X-Request-Id'] = request.request_id
+            record = _finish(request, response, started)
+            if record is not None:
+                async_to_sync(write_call_log)(record)
             return response
     return middleware
+
+
+def _start(request) -> float:
+    request.request_id = str(uuid.uuid4())
+    return time.perf_counter()
+
+
+def _finish(request, response, started: float):
+    """Set the header and, for the unified route, write the access line. Return the CallRecord to store, if any."""
+    response['X-Request-Id'] = request.request_id
+    match = getattr(request, 'resolver_match', None)
+    if match is None or match.view_name != UNIFIED_ROUTE:
+        return None
+    duration_ms = int((time.perf_counter() - started) * 1000)
+    api_key = getattr(request, 'auth', None)  # set by Ninja only after successful auth
+    tool_id, operation = match.kwargs.get('tool_id', ''), match.kwargs.get('operation', '')
+    access_logger.info('%s %s %s %s %s %d', request.request_id, api_key.platform.slug if api_key else '-',
+                       tool_id, operation, response.status_code, duration_ms)
+    if api_key is None:
+        return None  # unauthenticated: the access line only, never a row (spec §8.1)
+    record = getattr(request, 'call_record', None)
+    if record is None:  # Ninja rejected it before invoke ran
+        record = new_record(request, tool_id, operation)
+        record.error_code = _REJECTED_BEFORE_VIEW.get(response.status_code, INTERNAL)
+    record.status = response.status_code
+    record.duration_ms = duration_ms
+    return record

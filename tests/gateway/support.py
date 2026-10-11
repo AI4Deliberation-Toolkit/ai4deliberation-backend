@@ -9,10 +9,23 @@ import httpx
 from asgiref.sync import sync_to_async
 from django.test import TestCase
 
+from gateway.adapters.base import Adapter
 from gateway.keys import issue_key
 from gateway.models import Platform, Tool
 
 FIXTURES = Path(__file__).resolve().parent.parent / 'fixtures'
+
+
+UNKNOWN_KEY = 'gw_AAAAAAAA_' + '0' * 64
+
+
+def reply_json(status, body):
+    return lambda request: httpx.Response(status, json=body)
+
+
+class BrokenAdapter(Adapter):
+    def build_request(self, tool, operation, envelope):
+        raise RuntimeError('adapter bug with details')
 
 
 def load_fixture(name):
@@ -61,6 +74,10 @@ class GatewayTestCase(TestCase):
         super().setUp()
         self.platform = Platform.objects.create(name='WP site', slug='wp-site')
         self.key, self.api_key = issue_key(self.platform, label='tests')
+        # Keep the per-request access line out of the suite output; assertLogs still sees it.
+        access_logger = logging.getLogger('gateway.access')
+        propagate, access_logger.propagate = access_logger.propagate, False
+        self.addCleanup(setattr, access_logger, 'propagate', propagate)
         self.tool_requests: list[httpx.Request] = []
         self.tool_reply = lambda request: httpx.Response(200, json={'output': {}, 'metadata': {}})
 

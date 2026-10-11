@@ -1,5 +1,9 @@
-"""The unified route's core: lookup → adapter → call → wrap (spec §6.4)."""
+"""The unified route's core: lookup → adapter → call → wrap (spec §6.4).
+
+The outcome goes on request.call_record; the request-ID middleware writes the CallLog row.
+"""
 import logging
+import time
 
 import httpx
 from cryptography.fernet import InvalidToken
@@ -7,8 +11,10 @@ from cryptography.fernet import InvalidToken
 from gateway import http
 from gateway.adapters import ADAPTERS
 from gateway.adapters.base import Result, ToolError
+from gateway.calllog import CallRecord, logged_metadata, new_record
 from gateway.errors import (
-    INTERNAL, OPERATION_NOT_FOUND, TOOL_AUTH_FAILED, TOOL_NOT_FOUND, TOOL_TIMEOUT, TOOL_UNREACHABLE, GatewayError,
+    INTERNAL, OPERATION_NOT_FOUND, TOOL_AUTH_FAILED, TOOL_ERROR, TOOL_NOT_FOUND, TOOL_TIMEOUT, TOOL_UNREACHABLE,
+    GatewayError,
 )
 from gateway.logging_filters import register_sensitive_header
 from gateway.models import Tool
@@ -20,11 +26,21 @@ TOOL_BODY_TEXT_LIMIT = 4096
 
 
 async def invoke(request, tool_id: str, operation: str, envelope: Envelope) -> dict:
+    record = request.call_record = new_record(request, tool_id, operation)
     try:
-        result = await _call_tool(request, tool_id, operation, envelope)
-    except (GatewayError, ToolError) as exc:
+        result = await _call_tool(request, tool_id, operation, envelope, record)
+    except GatewayError as exc:
         exc.tool_id = tool_id
+        record.error_code, record.error_source = exc.code, 'gateway'
         raise
+    except ToolError as exc:
+        exc.tool_id = tool_id
+        record.error_code, record.error_source = TOOL_ERROR, 'tool'
+        raise
+    # Anything unexpected keeps the record's defaults (INTERNAL). The middleware stores the status sent.
+    record.error_code = record.error_source = None
+    for name, value in logged_metadata(result.metadata).items():
+        setattr(record, name, value)
     return {
         'output': result.output,
         # The gateway's own fields win: a tool can't override them.
@@ -33,7 +49,7 @@ async def invoke(request, tool_id: str, operation: str, envelope: Envelope) -> d
     }
 
 
-async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope) -> Result:
+async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope, record: CallRecord) -> Result:
     try:
         tool = await Tool.objects.aget(tool_id=tool_id, enabled=True)
     except Tool.DoesNotExist:
@@ -43,6 +59,7 @@ async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope) 
     adapter = ADAPTERS[tool.adapter]
     outbound = adapter.build_request(tool, operation, envelope)
     headers = _outbound_headers(request, tool)
+    tool_started = time.perf_counter()
     try:
         response = await http.get_client().request(
             outbound.method, tool.base_url + outbound.path, params=outbound.params, json=outbound.json,
@@ -52,6 +69,10 @@ async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope) 
         raise GatewayError(TOOL_TIMEOUT) from None
     except httpx.TransportError:  # connect, DNS, TLS
         raise GatewayError(TOOL_UNREACHABLE) from None
+    finally:
+        record.tool_duration_ms = _ms_since(tool_started)
+    record.tool_status = response.status_code
+    record.response_bytes = len(response.content)
     if response.status_code in (401, 403):  # before the adapter sees it
         raise GatewayError(TOOL_AUTH_FAILED)
     try:
@@ -89,3 +110,7 @@ def _json_or_none(response: httpx.Response):
         return response.json()
     except ValueError:  # not JSON, including empty or undecodable bodies
         return None
+
+
+def _ms_since(started: float) -> int:
+    return int((time.perf_counter() - started) * 1000)

@@ -6,20 +6,9 @@ from cryptography.fernet import Fernet
 from django.test import override_settings
 
 from gateway.adapters import ADAPTERS
-from gateway.adapters.base import Adapter
-from tests.gateway.support import GatewayTestCase, assert_gateway_error, load_fixture
-
-UNKNOWN_KEY = 'gw_AAAAAAAA_' + '0' * 64
-
-
-def reply_json(status, body):
-    return lambda request: httpx.Response(status, json=body)
-
-
-class BrokenAdapter(Adapter):
-    def build_request(self, tool, operation, envelope):
-        raise RuntimeError('adapter bug with details')
-
+from tests.gateway.support import (
+    UNKNOWN_KEY, BrokenAdapter, GatewayTestCase, assert_gateway_error, load_fixture, reply_json,
+)
 
 class OrderTests(GatewayTestCase):
     def setUp(self):
