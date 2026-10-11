@@ -8,7 +8,7 @@ DEBUG = config('DEBUG', default=False, cast=bool)
 
 # Must list the public host(s) nginx passes through *and* 127.0.0.1,localhost
 # (the stub tool is called at 127.0.0.1:8000).
-ALLOWED_HOSTS = config('ALLOWED_HOSTS', cast=Csv())
+ALLOWED_HOSTS = [host for host in config('ALLOWED_HOSTS', cast=Csv()) if host]  # ' , ' is empty too
 if not ALLOWED_HOSTS:
     raise ImproperlyConfigured('ALLOWED_HOSTS is empty: list the public host(s) plus 127.0.0.1,localhost.')
 

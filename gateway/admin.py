@@ -112,6 +112,7 @@ class CallLogAdmin(admin.ModelAdmin):
     list_display = ('created_at', 'platform', 'tool_id', 'operation', 'status', 'error_code', 'duration_ms',
                     'request_id')
     list_filter = ('platform', 'tool_id', 'status', 'created_at')
+    search_fields = ('=request_id',)  # operators paste request IDs from partner logs
     date_hierarchy = 'created_at'
 
     def has_add_permission(self, request):

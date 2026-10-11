@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: ./docker/web/Dockerfile
     restart: always
+    # Don't add --access-logfile: it would route uvicorn.access (client IPs, URLs) to stdout with no
+    # redaction. nginx's access log already covers access.
     command: gunicorn -k uvicorn_worker.UvicornWorker -w 4 -b 0.0.0.0:8000 ai4deliberation_backend.asgi:application --timeout 300
     env_file:
       - .env

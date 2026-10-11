@@ -62,6 +62,10 @@ class StagingSettingsTests(SimpleTestCase):
         with self.assertRaises(ImproperlyConfigured):
             load_staging(ALLOWED_HOSTS='')
 
+    def test_blank_only_allowed_hosts_are_rejected_like_empty(self):
+        with self.assertRaises(ImproperlyConfigured):
+            load_staging(ALLOWED_HOSTS=' , ')
+
     def test_cors_is_closed_by_default(self):
         staging = load_staging()
         self.assertIs(staging.CORS_ALLOW_ALL_ORIGINS, False)
@@ -120,7 +124,7 @@ class BaseSettingsTests(SimpleTestCase):
 class DebugOffTests(TestCase):
     def test_unknown_urls_are_a_plain_404(self):
         for path in ('/nope', '/api/v1/nope', '/passthrough/topic-toolkit/extract'):
-            with self.subTest(path=path):
+            with self.subTest(path=path), self.assertLogs('django.request', 'WARNING'):
                 response = self.client.get(path)
                 self.assertEqual(response.status_code, 404)
                 self.assertNotIn(b'URLconf', response.content)

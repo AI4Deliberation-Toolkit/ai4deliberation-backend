@@ -27,7 +27,7 @@ class SmokeTests(TestCase):
             '/api/categorize-text/',
         ]
         for path in removed:
-            with self.subTest(path=path):
+            with self.subTest(path=path), self.assertLogs('django.request', 'WARNING'):
                 self.assertEqual(self.client.get(path).status_code, 404)
 
     def test_removed_apps_are_not_installed(self):

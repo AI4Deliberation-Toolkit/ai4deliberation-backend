@@ -113,8 +113,20 @@ class CallLogAdminTests(TestCase):
 
     def test_list_and_view_only(self):
         self.assertContains(self.client.get('/admin/gateway/calllog/'), str(self.row.request_id))
-        self.assertEqual(self.client.get('/admin/gateway/calllog/add/').status_code, 403)
         change_url = f'/admin/gateway/calllog/{self.row.pk}/change/'
         self.assertEqual(self.client.get(change_url).status_code, 200)  # view-only page
-        self.assertEqual(self.client.post(change_url, {'status': 500}).status_code, 403)
-        self.assertEqual(self.client.get(f'/admin/gateway/calllog/{self.row.pk}/delete/').status_code, 403)
+        # Django logs each 403 to django.request with a traceback: assert it, keep it out of the output.
+        with self.assertLogs('django.request', 'WARNING') as logs:
+            self.assertEqual(self.client.get('/admin/gateway/calllog/add/').status_code, 403)
+            self.assertEqual(self.client.post(change_url, {'status': 500}).status_code, 403)
+            self.assertEqual(self.client.get(f'/admin/gateway/calllog/{self.row.pk}/delete/').status_code, 403)
+        self.assertEqual(len(logs.records), 3)
+
+    def test_search_by_request_id(self):
+        other = CallLog.objects.create(request_id=uuid.uuid4(), platform=self.platform, key_prefix='ABCDEFGH',
+                                       tool_id='stub', operation='echo', status=200, duration_ms=5, request_bytes=10)
+        response = self.client.get('/admin/gateway/calllog/', {'q': str(self.row.request_id)})
+        self.assertEqual(list(response.context['cl'].result_list), [self.row])
+        self.assertNotContains(response, str(other.request_id))
+        response = self.client.get('/admin/gateway/calllog/', {'q': 'not-a-uuid'})  # a bad paste is no 500
+        self.assertEqual(list(response.context['cl'].result_list), [])

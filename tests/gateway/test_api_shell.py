@@ -8,7 +8,7 @@ from ninja import NinjaAPI, Schema
 from ninja.security import APIKeyHeader
 
 from gateway.errors import TOOL_NOT_FOUND, GatewayError, install_error_handlers
-from tests.gateway.support import assert_gateway_error
+from tests.gateway.support import assert_gateway_error, capture_logs
 
 
 class NeverAuth(APIKeyHeader):
@@ -52,37 +52,42 @@ urlpatterns = [path('shell/', shell_api.urls)]
 
 @override_settings(ROOT_URLCONF='tests.gateway.test_api_shell')
 class ErrorHandlerTests(TestCase):
+    # Each deliberate 4xx/5xx also gets a django.request line: assertLogs checks it and keeps it out of the output.
     async def test_gateway_error_shape(self):
-        response = await self.async_client.get('/shell/gateway-error')
+        with self.assertLogs('django.request', 'WARNING'):
+            response = await self.async_client.get('/shell/gateway-error')
         error = assert_gateway_error(self, response, 404, 'TOOL_NOT_FOUND')
         self.assertEqual(error['tool_id'], 'nope')
         self.assertNotIn('tool_status', error)
         self.assertNotIn('tool_body', error)
 
     async def test_validation_error_is_invalid_request(self):
-        response = await self.async_client.post('/shell/body', '{"input": [1]}', content_type='application/json')
+        with self.assertLogs('django.request', 'WARNING'):
+            response = await self.async_client.post('/shell/body', '{"input": [1]}', content_type='application/json')
         error = assert_gateway_error(self, response, 422, 'INVALID_REQUEST')
         self.assertIn('payload.input', error['message'])
 
     async def test_unparseable_body_is_invalid_request(self):
         for body, content_type in (('{"input": ', 'application/json'), ('plain', 'text/plain'), ('', 'application/json')):
-            with self.subTest(body=body, content_type=content_type):
+            with self.subTest(body=body, content_type=content_type), self.assertLogs('django.request', 'WARNING'):
                 response = await self.async_client.post('/shell/body', body, content_type=content_type)
                 assert_gateway_error(self, response, 422, 'INVALID_REQUEST')
 
     async def test_oversized_body_is_413_without_a_traceback(self):
         body = '{"input": {"text": "' + 'x' * 200 + '"}}'
         with override_settings(DATA_UPLOAD_MAX_MEMORY_SIZE=100):
-            with self.assertNoLogs('gateway.errors', 'ERROR'):
+            with self.assertNoLogs('gateway.errors', 'ERROR'), self.assertLogs('django.request', 'WARNING'):
                 response = await self.async_client.post('/shell/body', body, content_type='application/json')
         error = assert_gateway_error(self, response, 413, 'REQUEST_TOO_LARGE')
         self.assertIn('100 bytes', error['message'])
 
     async def test_ninja_authentication_error_is_unauthorized(self):
-        assert_gateway_error(self, await self.async_client.get('/shell/locked'), 401, 'UNAUTHORIZED')
+        with self.assertLogs('django.request', 'WARNING'):
+            response = await self.async_client.get('/shell/locked')
+        assert_gateway_error(self, response, 401, 'UNAUTHORIZED')
 
     async def test_unexpected_exception_is_a_generic_internal_error(self):
-        with self.assertLogs('gateway.errors', 'ERROR') as logs:
+        with self.assertLogs('gateway.errors', 'ERROR') as logs, self.assertLogs('django.request', 'ERROR'):
             response = await self.async_client.get('/shell/crash')
         error = assert_gateway_error(self, response, 500, 'INTERNAL')
         self.assertNotIn('secret detail', response.content.decode())
@@ -94,7 +99,8 @@ class RequestIdTests(TestCase):
     def test_every_response_carries_a_fresh_uuid4(self):
         ids = []
         for path in ('/admin/login/', '/nope', '/api/v1/health'):
-            response = self.client.get(path)
+            with capture_logs('django.request'):  # '/nope' is a deliberate 404
+                response = self.client.get(path)
             request_id = uuid.UUID(response['X-Request-Id'])
             self.assertEqual(request_id.version, 4)
             ids.append(request_id)
@@ -117,7 +123,8 @@ class HealthTests(TestCase):
 
     async def test_health_reports_a_database_error(self):
         with mock.patch('gateway.api._ping_database', side_effect=OperationalError('down')):
-            response = await self.async_client.get('/api/v1/health')
+            with self.assertLogs('django.request', 'ERROR'):
+                response = await self.async_client.get('/api/v1/health')
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json(), {'status': 'error', 'database': 'error'})
 
