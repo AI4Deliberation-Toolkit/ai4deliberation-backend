@@ -181,3 +181,38 @@ class Tool(models.Model):
         if not self.tool_key:
             return 'open'
         return 'gateway_only' if self.gateway_only else 'direct'
+
+
+class CallLog(models.Model):
+    """One row per authenticated call to the unified route, written by the middleware: metadata only (spec §8.1).
+
+    Never stored: bodies, tool_body, X-User-Context, any key, client IP.
+    """
+
+    request_id = models.UUIDField(unique=True)
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    platform = models.ForeignKey(Platform, on_delete=models.PROTECT, related_name='calls')
+    key_prefix = models.CharField(max_length=8)
+    tool_id = models.CharField(max_length=64)
+    operation = models.CharField(max_length=64)
+    status = models.PositiveSmallIntegerField()
+    error_code = models.CharField(max_length=32, null=True, blank=True)
+    error_source = models.CharField(max_length=16, null=True, blank=True)
+    tool_status = models.PositiveSmallIntegerField(null=True, blank=True)
+    duration_ms = models.PositiveIntegerField()
+    tool_duration_ms = models.PositiveIntegerField(null=True, blank=True)
+    request_bytes = models.PositiveIntegerField(help_text='Size of the incoming request body.')
+    response_bytes = models.PositiveIntegerField(
+        null=True, blank=True, help_text="Size of the tool's response body; empty when the tool never answered.",
+    )
+    tool_version = models.CharField(max_length=100, null=True, blank=True)
+    model_id = models.CharField(max_length=100, null=True, blank=True)
+    taxonomy_version = models.CharField(max_length=100, null=True, blank=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'call log entry'
+        verbose_name_plural = 'call log'
+
+    def __str__(self):
+        return f'{self.request_id} {self.tool_id}/{self.operation} {self.status}'

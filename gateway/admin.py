@@ -6,7 +6,7 @@ from django.utils.cache import add_never_cache_headers
 
 from gateway.adapters import ADAPTERS
 from gateway.keys import assign_new_key
-from gateway.models import ApiKey, Platform, Tool
+from gateway.models import ApiKey, CallLog, Platform, Tool
 
 
 @admin.register(Platform)
@@ -103,3 +103,22 @@ class ToolAdmin(admin.ModelAdmin):
         if obj.uses_plain_http_off_loopback:
             messages.warning(request, f'{obj.tool_id} uses plain http to a non-loopback host: '
                                       f'its tool key travels unencrypted.')
+
+
+@admin.register(CallLog)
+class CallLogAdmin(admin.ModelAdmin):
+    """Read-only. Rows leave only through purge_call_logs."""
+
+    list_display = ('created_at', 'platform', 'tool_id', 'operation', 'status', 'error_code', 'duration_ms',
+                    'request_id')
+    list_filter = ('platform', 'tool_id', 'status', 'created_at')
+    date_hierarchy = 'created_at'
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
