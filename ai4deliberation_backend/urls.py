@@ -14,11 +14,13 @@ Including another URLconf
     1. Import the include() function: from django.urls import include, path
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
+from django.conf import settings
 from django.contrib import admin
 from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import path
 
 from gateway.api import api
+from gateway.stub import stub_view
 
 
 def build_urlpatterns():
@@ -27,6 +29,10 @@ def build_urlpatterns():
         path('admin/', admin.site.urls),
         path('api/v1/', api.urls),
     ]
+    if settings.GATEWAY_ENABLE_STUB:
+        # Registered in admin like any tool: tool_id=stub, depth=native, adapter=native,
+        # base_url=http://127.0.0.1:8000/stub, operations=["echo"].
+        patterns.append(path('stub/<slug:operation>', stub_view))
     # Admin static files under uvicorn in local dev; empty unless DEBUG.
     patterns += staticfiles_urlpatterns()
     return patterns
