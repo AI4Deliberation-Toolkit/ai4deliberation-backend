@@ -7,6 +7,11 @@ class SmokeTests(TestCase):
         response = self.client.get('/admin/login/')
         self.assertEqual(response.status_code, 200)
 
+    def test_health_answers(self):
+        response = self.client.get('/api/v1/health')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['status'], 'ok')
+
     def test_removed_nlp_endpoints_are_gone(self):
         removed = [
             '/api/topics',

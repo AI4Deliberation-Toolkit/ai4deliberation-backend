@@ -15,8 +15,21 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
+from django.contrib.staticfiles.urls import staticfiles_urlpatterns
 from django.urls import path
 
-urlpatterns = [
-    path('admin/', admin.site.urls),
-]
+from gateway.api import api
+
+
+def build_urlpatterns():
+    """Built by a function so tests can rebuild the URLconf after changing settings."""
+    patterns = [
+        path('admin/', admin.site.urls),
+        path('api/v1/', api.urls),
+    ]
+    # Admin static files under uvicorn in local dev; empty unless DEBUG.
+    patterns += staticfiles_urlpatterns()
+    return patterns
+
+
+urlpatterns = build_urlpatterns()
