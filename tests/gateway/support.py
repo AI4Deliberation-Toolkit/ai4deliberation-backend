@@ -1,4 +1,12 @@
 """Shared helpers for the gateway tests."""
+import json
+from pathlib import Path
+
+FIXTURES = Path(__file__).resolve().parent.parent / 'fixtures'
+
+
+def load_fixture(name):
+    return json.loads((FIXTURES / 'topic_toolkit' / name).read_text(encoding='utf-8'))
 
 
 def assert_gateway_error(test, response, status, code, source='gateway'):

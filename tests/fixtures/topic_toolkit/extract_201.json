@@ -1,0 +1,14 @@
+{
+  "id": "6f1d2c3a-8b4e-4f7a-9c21-5d3e8a7b9f10",
+  "article_id": "fixture-article-1",
+  "platform": "wp-fixture",
+  "language": "el",
+  "language_source": "explicit",
+  "normalized": [
+    {"topic_id": "labour_and_employment", "score": 0.81, "raw_score": 0.62},
+    {"topic_id": "public_finance", "score": 0.44, "raw_score": 0.35}
+  ],
+  "backend": "embedding",
+  "computed_at": "2026-10-11T12:00:00.000000+00:00",
+  "taxonomy_version": "2026-05-21-1"
+}

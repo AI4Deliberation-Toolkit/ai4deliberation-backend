@@ -1,0 +1,14 @@
+{
+  "id": "0b7e4d21-3c9a-4e55-8f10-2a6b9c8d7e31",
+  "article_id": "fixture-article-1",
+  "platform": "wp-fixture",
+  "language": "el",
+  "language_source": "explicit",
+  "normalized": [
+    {"topic_id": "labour_and_employment", "score": 0.81, "raw_score": 0.62, "label": "Εργασία & Απασχόληση", "parent": "economic_fiscal"},
+    {"topic_id": "public_finance", "score": 0.44, "raw_score": 0.35, "label": "Δημόσια Οικονομικά", "parent": "economic_fiscal"}
+  ],
+  "backend": "embedding",
+  "computed_at": "2026-10-11T12:00:05.000000+00:00",
+  "taxonomy_version": "2026-05-21-1"
+}
