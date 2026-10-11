@@ -1,11 +1,16 @@
 """The gateway's HTTP API, mounted at /api/v1/ (spec §4.2)."""
 from asgiref.sync import sync_to_async
 from django.db import DatabaseError, connection
-from ninja import NinjaAPI
+from ninja import NinjaAPI, Path
+from ninja.responses import codes_4xx, codes_5xx
 
 from gateway.auth import GatewayKeyAuth
 from gateway.errors import install_error_handlers
-from gateway.schemas import Health
+from gateway.invoke import invoke
+from gateway.models import SLUG_PATTERN
+from gateway.schemas import Envelope, ErrorResponse, Health, UnifiedResponse
+
+ERRORS = {codes_4xx: ErrorResponse, codes_5xx: ErrorResponse}
 
 api = NinjaAPI(
     title='AI4Deliberation Unified API',
@@ -32,3 +37,18 @@ async def health(request):
     except DatabaseError:
         return 503, {'status': 'error', 'database': 'error'}
     return 200, {'status': 'ok', 'database': 'ok'}
+
+
+@api.post('/tools/{tool_id}/{operation}', url_name='call_tool', response={200: UnifiedResponse, **ERRORS},
+          tags=['tools'])
+async def call_tool(
+    request,
+    envelope: Envelope,
+    tool_id: str = Path(..., pattern=SLUG_PATTERN, max_length=64),
+    operation: str = Path(..., pattern=SLUG_PATTERN, max_length=64),
+):
+    """Call one operation of a registered tool. `input` and `output` stay in the tool's own format.
+
+    Ninja runs auth first, then envelope validation, then this view.
+    """
+    return await invoke(request, tool_id, operation, envelope)

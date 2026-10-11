@@ -21,7 +21,7 @@ TOOL_ERROR = 'TOOL_ERROR'
 INTERNAL = 'INTERNAL'
 
 # TOOL_ERROR is deliberately absent from STATUS and MESSAGES: it is raised only via the adapter's
-# ToolError (source `tool`), whose status comes from `tool_error_status` (added in a later task).
+# ToolError (source `tool`), whose status comes from `tool_error_status`.
 STATUS = {
     UNAUTHORIZED: 401,
     TOOL_NOT_FOUND: 404,
@@ -60,6 +60,11 @@ class GatewayError(Exception):
         super().__init__(self.message)
 
 
+def tool_error_status(tool_status: int) -> int:
+    """A tool's 4xx is mirrored; anything else (5xx, an unfollowed 3xx) becomes 502."""
+    return tool_status if 400 <= tool_status < 500 else 502
+
+
 def error_response(request, code, message, status, *, source='gateway', tool_id=None, tool_status=None,
                    tool_body=None) -> JsonResponse:
     error = {
@@ -78,6 +83,12 @@ def error_response(request, code, message, status, *, source='gateway', tool_id=
 
 def _on_gateway_error(request, exc: GatewayError):
     return error_response(request, exc.code, exc.message, exc.status, tool_id=exc.tool_id)
+
+
+def _on_tool_error(request, exc):
+    # tool_body goes back to the caller and is never logged.
+    return error_response(request, TOOL_ERROR, exc.message, tool_error_status(exc.status), source='tool',
+                          tool_id=exc.tool_id, tool_status=exc.status, tool_body=exc.body)
 
 
 def _on_authentication_error(request, exc):
@@ -116,6 +127,9 @@ def _on_unexpected(request, exc: Exception):
 
 
 def install_error_handlers(api) -> None:
+    from gateway.adapters.base import ToolError  # here, not at the top: gateway.adapters imports this module
+
+    api.add_exception_handler(ToolError, _on_tool_error)
     api.add_exception_handler(GatewayError, _on_gateway_error)
     api.add_exception_handler(AuthenticationError, _on_authentication_error)
     api.add_exception_handler(ValidationError, _on_validation_error)

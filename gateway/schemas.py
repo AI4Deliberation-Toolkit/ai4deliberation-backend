@@ -22,3 +22,17 @@ class Envelope(Schema):
 class UnifiedResponse(Schema):
     output: dict[str, Any]
     metadata: dict[str, Any]
+
+
+class ErrorDetail(Schema):
+    source: str  # "gateway" | "tool"
+    code: str
+    message: str
+    request_id: str | None
+    tool_id: str | None = None
+    tool_status: int | None = None  # source "tool" only
+    tool_body: Any = None  # source "tool" only: the tool's JSON error body, or its text (≤ 4 KB)
+
+
+class ErrorResponse(Schema):
+    error: ErrorDetail
