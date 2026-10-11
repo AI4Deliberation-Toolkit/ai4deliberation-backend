@@ -2,7 +2,7 @@
 set -euo pipefail
 
 echo "Waiting for postgres..."
-while ! nc -z db 5432; do
+while ! nc -z "${POSTGRES_HOST:-db}" "${POSTGRES_PORT:-5432}"; do
   sleep 0.1
 done
 echo "PostgreSQL started"
