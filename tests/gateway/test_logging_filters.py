@@ -60,6 +60,19 @@ class RedactionTests(SimpleTestCase):
                 self.assertNotIn(arg, out)
                 self.assertIn(REDACTED, out)
 
+    def test_dict_style_args_are_masked_by_key(self):
+        stream = io.StringIO()
+        handler = logging.StreamHandler(stream)
+        handler.addFilter(RedactingFilter())
+        logger = logging.getLogger('test.dict_args')
+        logger.propagate = False
+        logger.addHandler(handler)
+        try:
+            logger.warning('key %(X-API-Key)s for %(tool)s', {'X-API-Key': 'dict-style-secret', 'tool': 'stub'})
+        finally:
+            logger.removeHandler(handler)
+        self.assertEqual(stream.getvalue(), f'key {REDACTED} for stub\n')
+
     def test_bare_gateway_key_arg(self):
         self.assertNotIn(KEY, filtered('key was %s', (KEY,)).getMessage())
 
@@ -74,6 +87,16 @@ class RedactionTests(SimpleTestCase):
         self.assertNotIn('abc', out)
         self.assertNotIn('def', out)
         self.assertIn("'other': 1", out)
+
+    def test_quoted_value_with_escaped_quotes_is_masked_whole(self):
+        for text in ('{"X-User-Context": "{\\"user_id\\": \\"42\\"}"}',
+                     "{'X-User-Context': 'it\\'s user 42'}"):
+            with self.subTest(text=text):
+                out = redact_text(text)
+                for fragment in ('user_id', '42', 'user 42'):
+                    self.assertNotIn(fragment, out)
+        self.assertEqual(redact_text('{"X-User-Context": "{\\"user_id\\": \\"42\\"}", "other": 1}'),
+                         '{"X-User-Context": ' + REDACTED + ', "other": 1}')
 
     def test_dict_args(self):
         record = filtered('%(headers)s', ({'headers': {'X-API-Key': 'dict-secret'}},))
