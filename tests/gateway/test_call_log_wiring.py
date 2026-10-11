@@ -127,6 +127,22 @@ class AccessLineTests(GatewayTestCase):
         _, platform, _, _, status, _ = logs.records[0].getMessage().split(' ')
         self.assertEqual((platform, status), ('-', '401'))
 
+    async def test_path_segments_are_percent_encoded_in_the_line(self):
+        # Unauthenticated callers control these segments: they must not forge or split a line.
+        with self.assertLogs('gateway.access', 'INFO') as logs:
+            await self.call('a%0AFAKE%20wp-site%20stub%20echo%20200%201', 'e%20x', key=None)
+        message = logs.records[0].getMessage()
+        self.assertNotIn('\n', message)
+        fields = message.split(' ')
+        self.assertEqual(len(fields), 6)
+        self.assertEqual(fields[2:4], ['a%0AFAKE%20wp-site%20stub%20echo%20200%201', 'e%20x'])
+
+    async def test_long_segments_are_cut_to_64_before_encoding(self):
+        with self.assertLogs('gateway.access', 'INFO') as logs:
+            await self.call('x' * 70, 'y' * 63 + '%20z', key=None)
+        fields = logs.records[0].getMessage().split(' ')
+        self.assertEqual((fields[2], fields[3]), ('x' * 64, 'y' * 63 + '%20'))
+
     async def test_other_routes_get_no_line(self):
         with self.assertNoLogs('gateway.access', 'INFO'):
             await self.async_client.get('/api/v1/health')

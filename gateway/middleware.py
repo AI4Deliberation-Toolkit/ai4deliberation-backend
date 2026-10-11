@@ -7,6 +7,7 @@ that writes both, and the stored status is always the status sent.
 import logging
 import time
 import uuid
+from urllib.parse import quote
 
 from asgiref.sync import async_to_sync, iscoroutinefunction
 from django.utils.decorators import sync_and_async_middleware
@@ -47,6 +48,12 @@ def _start(request) -> float:
     return time.perf_counter()
 
 
+def _loggable(segment: str) -> str:
+    """Path segments are caller-controlled and unvalidated here: cut and percent-encode so they can't
+    forge or split a log line. Valid slugs come out unchanged."""
+    return quote(segment[:64], safe='')
+
+
 def _finish(request, response, started: float):
     """Set the header and, for the unified route, write the access line. Return the CallRecord to store, if any."""
     response['X-Request-Id'] = request.request_id
@@ -57,7 +64,7 @@ def _finish(request, response, started: float):
     api_key = getattr(request, 'auth', None)  # set by Ninja only after successful auth
     tool_id, operation = match.kwargs.get('tool_id', ''), match.kwargs.get('operation', '')
     access_logger.info('%s %s %s %s %s %d', request.request_id, api_key.platform.slug if api_key else '-',
-                       tool_id, operation, response.status_code, duration_ms)
+                       _loggable(tool_id), _loggable(operation), response.status_code, duration_ms)
     if api_key is None:
         return None  # unauthenticated: the access line only, never a row (spec §8.1)
     record = getattr(request, 'call_record', None)
