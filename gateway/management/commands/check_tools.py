@@ -26,13 +26,13 @@ class Command(BaseCommand):
             raise CommandError(f'{failures} tool(s) not ok', returncode=1)
 
     def _check(self, client, tool):
-        if not tool.health_path:
-            return 'no health_path'
-        headers = {}
         try:
             key = tool.get_tool_key()
         except InvalidToken:
             return 'KEY ERROR (tool key cannot be decrypted)'
+        if not tool.health_path:
+            return 'no health_path'
+        headers = {}
         if key:
             register_sensitive_header(tool.key_header)
             headers[tool.key_header] = key

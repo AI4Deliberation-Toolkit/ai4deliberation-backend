@@ -93,3 +93,11 @@ class CheckToolsTests(TestCase):
         self.assertEqual(lines, ['alpha: KEY ERROR (tool key cannot be decrypted)'])
         self.assertEqual(code, 1)
         self.assertEqual(self.seen, [])
+
+    def test_undecryptable_key_fails_even_without_a_health_path(self):
+        with override_settings(GATEWAY_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            self.add_tool('alpha', 200, health_path='', tool_key='tk-1')
+        with override_settings(GATEWAY_ENCRYPTION_KEYS=[Fernet.generate_key().decode()]):
+            lines, code = self.run_command()
+        self.assertEqual(lines, ['alpha: KEY ERROR (tool key cannot be decrypted)'])
+        self.assertEqual(code, 1)

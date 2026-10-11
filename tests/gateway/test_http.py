@@ -1,3 +1,4 @@
+import gc
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -38,6 +39,15 @@ class PerLoopClientTests(SimpleTestCase):
 
         self.assertEqual(async_to_sync(fetch)(), 200)
         self.assertEqual(async_to_sync(fetch)(), 200)
+
+    def test_clients_of_closed_loops_are_freed(self):
+        async def fetch():
+            return (await http.get_client().get(self.url)).status_code
+
+        for _ in range(3):
+            async_to_sync(fetch)()
+        gc.collect()
+        self.assertLessEqual(len(http._clients), 1)
 
     def test_one_client_per_loop(self):
         async def same():
