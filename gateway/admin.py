@@ -49,7 +49,7 @@ class ApiKeyAdmin(admin.ModelAdmin):
         add_never_cache_headers(response)
         return response
 
-    @admin.action(description='Revoke selected keys')
+    @admin.action(description='Revoke selected keys', permissions=['change'])
     def revoke_keys(self, request, queryset):
         count = queryset.filter(revoked_at__isnull=True).update(revoked_at=timezone.now())
         self.message_user(request, f'Revoked {count} key(s).')

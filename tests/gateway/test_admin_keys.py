@@ -3,6 +3,7 @@ import re
 from asgiref.sync import async_to_sync
 from django.contrib.admin.models import LogEntry
 from django.contrib.auth import get_user_model
+from django.contrib.auth.models import Permission
 from django.contrib.messages import get_messages
 from django.contrib.sessions.models import Session
 from django.test import TestCase
@@ -75,3 +76,23 @@ class ApiKeyAdminTests(TestCase):
     def test_platform_admin_lists_platforms(self):
         response = self.client.get('/admin/gateway/platform/')
         self.assertContains(response, 'WP site')
+
+
+class ApiKeyAdminViewOnlyTests(TestCase):
+    def setUp(self):
+        user = get_user_model().objects.create_user('viewer', 'v@example.org', 'pw', is_staff=True)
+        user.user_permissions.add(Permission.objects.get(codename='view_apikey'))
+        self.client.force_login(user)
+        self.platform = Platform.objects.create(name='WP site', slug='wp-site')
+        self.key, self.api_key = issue_key(self.platform)
+
+    def test_view_only_staff_cannot_revoke(self):
+        self.client.post('/admin/gateway/apikey/', {'action': 'revoke_keys', '_selected_action': [self.api_key.pk]})
+        self.api_key.refresh_from_db()
+        self.assertIsNone(self.api_key.revoked_at)
+        self.assertIsNotNone(async_to_sync(averify_key)(self.key))
+
+    def test_revoke_action_not_offered_to_view_only_staff(self):
+        response = self.client.get('/admin/gateway/apikey/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'revoke_keys')
