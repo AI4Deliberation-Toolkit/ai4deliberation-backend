@@ -145,3 +145,34 @@ CALL_LOG_RETENTION_DAYS = config('CALL_LOG_RETENTION_DAYS', default=180, cast=in
 # Largest request body the gateway reads; larger ones get 413 REQUEST_TOO_LARGE (spec §4.1).
 # nginx's client_max_body_size stays the outer bound.
 DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
+
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'filters': {
+        'redact_secrets': {'()': 'gateway.logging_filters.RedactingFilter'},
+    },
+    'formatters': {
+        'plain': {'format': '%(asctime)s %(levelname)s %(name)s %(message)s'},
+    },
+    'handlers': {
+        # Every handler must list 'redact_secrets' (tests/gateway/test_logging_filters.py checks it).
+        'console': {
+            'class': 'logging.StreamHandler',
+            'stream': 'ext://sys.stdout',
+            'formatter': 'plain',
+            'filters': ['redact_secrets'],
+        },
+    },
+    'root': {'handlers': ['console'], 'level': 'INFO'},
+    'loggers': {
+        # Replace Django's default handlers so everything goes through the filtered console handler.
+        'django': {'handlers': [], 'level': 'INFO', 'propagate': True},
+        # httpx logs full URLs at INFO and httpcore logs response headers at DEBUG (spec §8.3).
+        'httpx': {'level': 'WARNING'},
+        'httpcore': {'level': 'WARNING'},
+        # One line per unified call: request_id platform tool_id operation status duration_ms.
+        'gateway.access': {'level': 'INFO'},
+    },
+}
