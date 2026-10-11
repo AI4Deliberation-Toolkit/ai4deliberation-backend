@@ -3,6 +3,7 @@ from asgiref.sync import sync_to_async
 from django.db import DatabaseError, connection
 from ninja import NinjaAPI
 
+from gateway.auth import GatewayKeyAuth
 from gateway.errors import install_error_handlers
 from gateway.schemas import Health
 
@@ -13,6 +14,7 @@ api = NinjaAPI(
     urls_namespace='gateway',
     docs_url='/docs',
     openapi_url='/openapi.json',
+    auth=GatewayKeyAuth(),
 )
 install_error_handlers(api)
 
