@@ -1,4 +1,23 @@
+import re
+from urllib.parse import urlsplit
+
+from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+from gateway.crypto import decrypt, encrypt
+from gateway.logging_filters import register_sensitive_header
+
+# Tool IDs and operations are URL segments: the routes validate them with SLUG_PATTERN,
+# the registry with _SLUG_RE (same character set, used with fullmatch).
+SLUG_PATTERN = r'^[-a-zA-Z0-9_]+$'
+_SLUG_RE = re.compile(r'[-a-zA-Z0-9_]+')
+_HEADER_RE = re.compile(r'[A-Za-z0-9-]+')
+# Headers the gateway sets itself on every outbound call (spec §6.4 step 4).
+_GATEWAY_HEADERS = frozenset({'content-type', 'x-request-id', 'x-gateway-caller', 'x-user-context', 'x-gateway-key'})
+_LOOPBACK_HOSTS = frozenset({'localhost', '127.0.0.1', '::1'})
+# nginx's proxy_read_timeout is 300 s, and it must exceed every tool timeout.
+MAX_TIMEOUT_SECONDS = 290
 
 
 class Platform(models.Model):
@@ -33,3 +52,128 @@ class ApiKey(models.Model):
 
     def __str__(self):
         return f'gw_{self.prefix}_…'
+
+
+class Tool(models.Model):
+    """A registered tool. Changing base_url moves the tool without a redeploy (spec §5)."""
+
+    class Depth(models.TextChoices):
+        NATIVE = 'native'
+        ADAPTED = 'adapted'
+        PASSTHROUGH = 'passthrough'  # reserved; refused in v0
+
+    tool_id = models.SlugField(max_length=64, unique=True)
+    name = models.CharField(max_length=200)
+    description = models.TextField(blank=True)
+    docs_url = models.URLField(blank=True)
+    base_url = models.CharField(max_length=500, help_text='http(s) URL, no trailing slash, no query string.')
+    depth = models.CharField(max_length=16, choices=Depth.choices)
+    # Validated against gateway.adapters.ADAPTERS in clean(), not `choices`: a new adapter needs no migration.
+    adapter = models.CharField(max_length=64)
+    operations = models.JSONField(default=list, help_text='JSON list of operation slugs, e.g. ["extract"].')
+    tool_key = models.TextField(blank=True, default='', editable=False)  # MultiFernet token, never plaintext
+    key_header = models.CharField(max_length=100, default='X-API-Key')
+    gateway_only = models.BooleanField(default=False)
+    timeout_seconds = models.PositiveIntegerField(
+        default=30, validators=[MinValueValidator(1), MaxValueValidator(MAX_TIMEOUT_SECONDS)],
+    )
+    health_path = models.CharField(max_length=500, blank=True, help_text='Starts with "/"; may include a query.')
+    enabled = models.BooleanField(default=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['tool_id']
+
+    def __str__(self):
+        return self.tool_id
+
+    def save(self, *args, **kwargs):
+        self.full_clean()  # the same rules for admin and code paths
+        register_sensitive_header(self.key_header)
+        super().save(*args, **kwargs)
+
+    def clean(self):
+        from gateway.adapters import ADAPTERS  # adapters import Ninja; keep that out of model loading
+
+        errors = {}
+        adapter = ADAPTERS.get(self.adapter)
+        if adapter is None:
+            errors['adapter'] = f'Unknown adapter. Choose one of: {", ".join(sorted(ADAPTERS))}.'
+        if self.depth == self.Depth.PASSTHROUGH:
+            errors['depth'] = 'Pass-through is reserved and not built in v0.'
+        elif (self.depth == self.Depth.NATIVE) != (self.adapter == 'native'):
+            errors.setdefault('adapter', 'Native tools use the "native" adapter, and only native tools do.')
+        for field, error in (
+            ('operations', self._operations_error(adapter)),
+            ('base_url', self._base_url_error()),
+            ('health_path', self._health_path_error()),
+            ('key_header', self._key_header_error()),
+        ):
+            if error:
+                errors[field] = error
+        if errors:
+            raise ValidationError(errors)
+
+    def _operations_error(self, adapter):
+        ops = self.operations
+        if (not isinstance(ops, list) or not ops
+                or not all(isinstance(op, str) and len(op) <= 64 and _SLUG_RE.fullmatch(op) for op in ops)):
+            return 'A non-empty JSON list of operation slugs (letters, digits, "-" and "_"; at most 64 characters).'
+        if len(set(ops)) != len(ops):
+            return 'Operations must not repeat.'
+        if adapter is not None and adapter.operations is not None:
+            unsupported = sorted(set(ops) - adapter.operations)
+            if unsupported:
+                return f'Not supported by the {self.adapter} adapter: {", ".join(unsupported)}.'
+        return None
+
+    def _base_url_error(self):
+        parts = urlsplit(self.base_url)
+        if parts.scheme not in ('http', 'https') or not parts.hostname:
+            return 'Use an absolute http:// or https:// URL.'
+        if parts.username or parts.password:
+            return 'Put credentials in the tool key, not in the URL.'
+        if '?' in self.base_url or '#' in self.base_url:
+            return 'No query string or fragment.'
+        if self.base_url.endswith('/'):
+            return 'No trailing slash: paths are appended to it.'
+        return None
+
+    def _health_path_error(self):
+        if self.health_path and not self.health_path.startswith('/'):
+            return 'Start with "/": it is appended to base_url.'
+        return None
+
+    def _key_header_error(self):
+        if not _HEADER_RE.fullmatch(self.key_header or ''):
+            return 'Use a header name: letters, digits and "-".'
+        if self.key_header.lower() in _GATEWAY_HEADERS:
+            return 'The gateway sets this header itself; pick another.'
+        return None
+
+    @property
+    def uses_plain_http_off_loopback(self) -> bool:
+        """True when the tool key would travel unencrypted (admin shows a warning; allowed)."""
+        parts = urlsplit(self.base_url)
+        return parts.scheme == 'http' and parts.hostname not in _LOOPBACK_HOSTS
+
+    @property
+    def has_tool_key(self) -> bool:
+        return bool(self.tool_key)
+
+    def set_tool_key(self, plaintext: str) -> None:
+        self.tool_key = encrypt(plaintext)
+
+    def clear_tool_key(self) -> None:
+        self.tool_key = ''
+
+    def get_tool_key(self) -> str | None:
+        """Decrypt at call time only. Raises InvalidToken if GATEWAY_ENCRYPTION_KEYS can't read it."""
+        return decrypt(self.tool_key) if self.tool_key else None
+
+    @property
+    def reachability(self) -> str:
+        if not self.tool_key:
+            return 'open'
+        return 'gateway_only' if self.gateway_only else 'direct'
