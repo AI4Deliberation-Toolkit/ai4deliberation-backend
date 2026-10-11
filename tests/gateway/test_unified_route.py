@@ -167,6 +167,11 @@ class ToolOutcomeTests(GatewayTestCase):
                 self.tool_reply = reply
                 assert_gateway_error(self, await self.extract(), 502, 'TOOL_BAD_RESPONSE')
 
+    async def test_undecodable_content_encoding_is_bad_response(self):
+        self.tool_reply = lambda request: httpx.Response(
+            201, content=b'{"not": "gzip"}', headers={'Content-Encoding': 'gzip', 'Content-Type': 'application/json'})
+        assert_gateway_error(self, await self.extract(), 502, 'TOOL_BAD_RESPONSE')
+
     async def test_redirect_is_not_followed(self):
         self.tool_reply = lambda request: httpx.Response(302, headers={'Location': 'https://elsewhere.example.org/x'})
         error = assert_gateway_error(self, await self.extract(), 502, 'TOOL_ERROR', source='tool')
@@ -204,6 +209,13 @@ class HeaderTests(GatewayTestCase):
             with self.subTest(header=name):
                 self.assertNotIn(name, sent.headers)
         self.assertNotIn(self.key, str(sent.headers.raw) + sent.content.decode())
+
+    async def test_non_ascii_user_context_reaches_the_tool_byte_for_byte(self):
+        original = '{"name": "Ελένη"}'.encode('utf-8')
+        # The test client sends header values as latin-1, so this puts the UTF-8 bytes on the wire.
+        response = await self.call('topic-toolkit', 'extract', headers={'X-User-Context': original.decode('latin-1')})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn((b'X-User-Context', original), self.tool_requests[0].headers.raw)
 
     async def test_no_user_context_when_none_was_sent(self):
         await self.call('topic-toolkit', 'extract')

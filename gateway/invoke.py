@@ -13,8 +13,8 @@ from gateway.adapters import ADAPTERS
 from gateway.adapters.base import Result, ToolError
 from gateway.calllog import CallRecord, logged_metadata, new_record
 from gateway.errors import (
-    INTERNAL, OPERATION_NOT_FOUND, TOOL_AUTH_FAILED, TOOL_ERROR, TOOL_NOT_FOUND, TOOL_TIMEOUT, TOOL_UNREACHABLE,
-    GatewayError,
+    INTERNAL, OPERATION_NOT_FOUND, TOOL_AUTH_FAILED, TOOL_BAD_RESPONSE, TOOL_ERROR, TOOL_NOT_FOUND, TOOL_TIMEOUT,
+    TOOL_UNREACHABLE, GatewayError,
 )
 from gateway.logging_filters import register_sensitive_header
 from gateway.models import Tool
@@ -38,15 +38,16 @@ async def invoke(request, tool_id: str, operation: str, envelope: Envelope) -> d
         record.error_code, record.error_source = TOOL_ERROR, 'tool'
         raise
     # Anything unexpected keeps the record's defaults (INTERNAL). The middleware stores the status sent.
-    record.error_code = record.error_source = None
     for name, value in logged_metadata(result.metadata).items():
         setattr(record, name, value)
-    return {
+    response = {
         'output': result.output,
         # The gateway's own fields win: a tool can't override them.
         'metadata': {**result.metadata, 'request_id': request.request_id, 'tool_id': tool_id,
                      'operation': operation, 'session_id': envelope.session_id},
     }
+    record.error_code = record.error_source = None  # last: a failure above leaves INTERNAL in the row
+    return response
 
 
 async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope, record: CallRecord) -> Result:
@@ -67,6 +68,8 @@ async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope, 
         )
     except httpx.TimeoutException:
         raise GatewayError(TOOL_TIMEOUT) from None
+    except httpx.DecodingError:  # e.g. a Content-Encoding the body doesn't match; raised before a response exists
+        raise GatewayError(TOOL_BAD_RESPONSE) from None
     except httpx.TransportError:  # connect, DNS, TLS
         raise GatewayError(TOOL_UNREACHABLE) from None
     finally:
@@ -83,7 +86,7 @@ async def _call_tool(request, tool_id: str, operation: str, envelope: Envelope, 
         raise
 
 
-def _outbound_headers(request, tool: Tool) -> dict[str, str]:
+def _outbound_headers(request, tool: Tool) -> dict[str, str | bytes]:
     """Exactly these headers reach the tool. Nothing else from the incoming request is forwarded,
     so X-Gateway-Key can never leak to a tool."""
     headers = {
@@ -93,7 +96,9 @@ def _outbound_headers(request, tool: Tool) -> dict[str, str]:
     }
     user_context = request.headers.get('X-User-Context')
     if user_context is not None:
-        headers['X-User-Context'] = user_context  # forwarded unchanged; never stored or logged
+        # Forwarded unchanged; never stored or logged. Django decoded the header bytes as latin-1, so
+        # encoding back gives the original bytes, which httpx sends verbatim (a str must be ASCII).
+        headers['X-User-Context'] = user_context.encode('latin-1')
     try:
         key = tool.get_tool_key()
     except InvalidToken:

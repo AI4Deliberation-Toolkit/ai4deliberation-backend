@@ -9,6 +9,8 @@ from django.db import DatabaseError, close_old_connections
 from django.test import override_settings
 
 from gateway.adapters import ADAPTERS
+from gateway.adapters.base import Result
+from gateway.adapters.topic_toolkit import TopicToolkitAdapter
 from gateway.models import CallLog
 from tests.gateway.support import (
     UNKNOWN_KEY, BrokenAdapter, GatewayTestCase, capture_logs, load_fixture, reply_json,
@@ -76,6 +78,36 @@ class CallLogRowTests(GatewayTestCase):
                 await self.call('topic-toolkit', 'extract')
         row = await self.row()
         self.assertEqual((row.status, row.error_code, row.error_source), (500, 'INTERNAL', 'gateway'))
+
+    async def test_bad_content_encoding_row(self):
+        self.tool_reply = lambda request: httpx.Response(201, content=b'plain', headers={'Content-Encoding': 'gzip'})
+        await self.call('topic-toolkit', 'extract')
+        row = await self.row()
+        self.assertEqual((row.status, row.error_code, row.error_source), (502, 'TOOL_BAD_RESPONSE', 'gateway'))
+        # httpx raises before it hands back a response, so there is no tool status or size to record.
+        self.assertEqual((row.tool_status, row.response_bytes), (None, None))
+        self.assertIsNotNone(row.tool_duration_ms)
+
+    async def test_failure_while_building_the_response_leaves_internal(self):
+        class ExplodingMetadata(dict):
+            # .get() works (logged_metadata), but unpacking it into the response raises.
+            def __iter__(self):
+                raise RuntimeError('boom')
+
+            def keys(self):
+                raise RuntimeError('boom')
+
+        class ExplodingAdapter(TopicToolkitAdapter):
+            def parse_response(self, tool, operation, status, body):
+                return Result(output={}, metadata=ExplodingMetadata())
+
+        self.tool_reply = reply_json(201, load_fixture('extract_201.json'))
+        with mock.patch.dict(ADAPTERS, {'topic_toolkit': ExplodingAdapter()}):
+            with self.assertLogs('gateway.errors', 'ERROR'):
+                await self.call('topic-toolkit', 'extract')
+        row = await self.row()
+        self.assertEqual((row.status, row.error_code, row.error_source, row.tool_status),
+                         (500, 'INTERNAL', 'gateway', 201))
 
     async def test_unauthenticated_calls_write_no_row(self):
         await self.call('topic-toolkit', 'extract', key=None)
