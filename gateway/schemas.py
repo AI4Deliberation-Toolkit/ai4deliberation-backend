@@ -36,3 +36,13 @@ class ErrorDetail(Schema):
 
 class ErrorResponse(Schema):
     error: ErrorDetail
+
+
+class CatalogueEntry(Schema):
+    tool_id: str
+    name: str
+    description: str
+    docs_url: str
+    operations: list[str]
+    depth: str  # native | adapted
+    reachability: str  # open | direct | gateway_only

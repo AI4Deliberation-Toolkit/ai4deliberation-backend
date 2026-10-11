@@ -12,6 +12,12 @@ class SmokeTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()['status'], 'ok')
 
+    def test_catalogue_requires_a_key(self):
+        with self.assertLogs('django.request', 'WARNING'):
+            response = self.client.get('/api/v1/tools')
+        self.assertEqual(response.status_code, 401)
+        self.assertEqual(response.json()['error']['code'], 'UNAUTHORIZED')
+
     def test_removed_nlp_endpoints_are_gone(self):
         removed = [
             '/api/topics',
