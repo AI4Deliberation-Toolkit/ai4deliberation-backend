@@ -231,6 +231,159 @@ scenario_status() {
   check 'last restore recorded' grep -qE '^last restore: +[0-9]{8}T[0-9]{6}Z [0-9]+s$' <<< "$out"
 }
 
+scenario_retention() {
+  title '4. Forced daily cycles: retention keeps 3 base backups and 7 dumps; restore still works'
+  # BACKUP_KEEP_SECONDS=0: no age margin, so the count cap applies to backups minutes apart.
+  replace pod-3 pod-4 main drill-1 -e BACKUP_FORCE_CYCLE=1 -e BACKUP_KEEP_SECONDS=0
+  wait_log pod-4 'restore complete' 120
+  check 'eight daily cycles' wait_log pod-4 'daily cycle complete' 240 8
+  docker stop -t 15 pod-4 >/dev/null
+  check '3 complete base backups' [ "$(complete_count main)" = 3 ]
+  check '7 dumps' [ "$(on_volume main 'ls /workspace/gateway-backup/dumps/*.dump | wc -l')" = 7 ]
+  check 'purge ran' on_volume main 'test -s /workspace/gateway-backup/status/last-purge'
+  check 'no WAL older than the cut-off' on_volume main '
+    source /usr/src/app/docker/pod/lib.sh
+    mapfile -t kept < <(complete_backups "$BACKUP_DIR/base")
+    cutoff=$(wal_cutoff "${kept[@]}")
+    for f in $(ls "$BACKUP_DIR/wal" | grep -E "^[0-9A-F]{24}\.gz$"); do [[ ${f:8:16} < ${cutoff:8} ]] && exit 1; done
+    exit 0'
+  replace pod-4 pod-5 main drill-1
+  check 'restore after retention' wait_log pod-5 'restore complete' 120
+  check 'app ready' wait_ready pod-5
+  check 'data present' has_platform pod-5 row-a
+}
+
+scenario_safety() {
+  title '5. Safety rules'
+
+  start safe-novol - drill-9
+  check 'no volume: refused' wait_refused safe-novol
+  sleep 3
+  check 'no volume: stays alive' running safe-novol
+  local started=$SECONDS
+  docker stop -t 15 safe-novol >/dev/null
+  check "no volume: stops at once on SIGTERM ($((SECONDS - started)) s)" [ $((SECONDS - started)) -lt 5 ]
+
+  start safe-foreign main drill-2
+  check 'foreign owner: refused' wait_refused safe-foreign
+  check 'foreign owner: names the owner' refused_with safe-foreign "belongs to pod 'drill-1'"
+
+  docker rm -f pod-5 safe-foreign >/dev/null
+  first_boot take-old take drill-1
+  start take-new take drill-2 -e BACKUP_TAKEOVER=drill-1
+  check 'takeover: restored' wait_log take-new 'restore complete' 120
+  check 'takeover: logged' wait_log take-new 'taken over from pod drill-1' 5
+  check 'takeover: owner rewritten' [ "$(on_volume take 'cat /workspace/gateway-backup/OWNER')" = drill-2 ]
+  add_platform take-old after-takeover
+  sql take-old 'select pg_switch_wal()' >/dev/null
+  check 'takeover: old pod fenced' wait_log take-old 'OWNER FENCE' 30
+  check 'takeover: old pod archive failures counted' [ "$(sql take-old 'select failed_count > 0 from pg_stat_archiver')" = t ]
+  docker rm -f take-old take-new >/dev/null
+
+  first_boot corrupt-a corrupt drill-1
+  docker stop -t 15 corrupt-a >/dev/null
+  on_volume corrupt 'f=$(ls -d /workspace/gateway-backup/base/*/ | tail -1)base.tar.gz; truncate -s 2000 "$f"'
+  replace corrupt-a corrupt-b corrupt drill-1
+  check 'corrupt base backup: refused' wait_refused corrupt-b
+  check 'corrupt base backup: no fresh init' [ "$(log_count corrupt-b 'fresh init')" = 0 ]
+  docker rm -f corrupt-b >/dev/null
+
+  first_boot gap-a gap drill-1
+  with_segments gap-a
+  docker stop -t 15 gap-a >/dev/null
+  local before
+  before=$(history_count gap)
+  on_volume gap 'cd /workspace/gateway-backup/wal; rm "$(ls | grep -E "^00000001[0-9A-F]{16}\.gz$" | tail -3 | head -1)"'
+  replace gap-a gap-b gap drill-1
+  check 'missing middle segment: refused' wait_refused gap-b
+  check 'missing middle segment: says recovery stopped early' refused_with gap-b 'stopped before the end of the archive'
+  check 'missing middle segment: archive untouched' [ "$(history_count gap)" = "$before" ]
+  # Runbook §6.3, "keep everything up to the damaged file", run as written in the refused container.
+  docker exec -i gap-b bash <<'EOF'
+source /usr/src/app/docker/pod/lib.sh
+rm -f "$PGDATA/conf.d/zz-restore.conf" "$POD_STATE_DIR/cluster-in-progress" "$POD_STATE_DIR/restore-corrupt"
+touch "$POD_STATE_DIR/needs-base-backup"
+EOF
+  docker restart -t 15 gap-b >/dev/null  # stands in for `kill 1` on Runpod: same container, same disk
+  check 'accept the loss (runbook 6.3): normal start' wait_log gap-b 'boot decision: normal' 60
+  check 'accept the loss: app ready' wait_ready gap-b
+  check 'accept the loss: timeline 2' timeline_is gap-b 2
+  check 'accept the loss: new base backup' wait_log gap-b 'base backup complete' 60
+  check 'accept the loss: timeline 2 history archived' wait_for_history gap $((before + 1))
+  docker rm -f gap-b >/dev/null
+
+  first_boot trunc-a trunc drill-1
+  with_segments trunc-a
+  docker stop -t 15 trunc-a >/dev/null
+  on_volume trunc 'cd /workspace/gateway-backup/wal; f=$(ls | grep -E "^00000001[0-9A-F]{16}\.gz$" | tail -3 | head -1); head -c 200 "$f" > x && mv x "$f"'
+  replace trunc-a trunc-b trunc drill-1
+  check 'truncated segment: refused' wait_refused trunc-b
+  check 'truncated segment: RESTORE ERROR logged' wait_log trunc-b 'RESTORE ERROR corrupt' 5
+  check 'truncated segment: says corrupt' refused_with trunc-b 'corrupt'
+  docker rm -f trunc-b >/dev/null
+
+  start marker main drill-1
+  wait_ready marker
+  docker exec marker touch /var/lib/gateway-pod/cluster-in-progress
+  docker restart -t 15 marker >/dev/null
+  check 'interrupted restore: rebuilt from the backups' wait_log marker 'restore complete' 120 2
+  check 'interrupted restore: app ready' wait_ready marker
+  check 'interrupted restore: data present' has_platform marker row-a
+  docker stop -t 15 marker >/dev/null
+
+  new_volume nobase
+  on_volume nobase 'mkdir -p /workspace/gateway-backup/wal && echo x | gzip > /workspace/gateway-backup/wal/000000010000000000000001.gz'
+  start nobase nobase drill-1
+  check 'archive without base: refused' wait_refused nobase
+  check 'archive without base: backup-reset' docker exec nobase backup-reset --yes
+  docker restart -t 15 nobase >/dev/null
+  check 'archive without base: fresh start after the reset' wait_log nobase 'boot decision: fresh' 60
+  docker rm -f nobase >/dev/null
+
+  replace marker renamed main drill-1 -e POSTGRES_USER=renamed
+  check 'POSTGRES_USER changed: refused' wait_refused renamed
+  check 'POSTGRES_USER changed: says why' refused_with renamed 'POSTGRES_USER must not change after the first boot'
+
+  replace renamed renamed-db main drill-1 -e POSTGRES_DB=renamed
+  check 'POSTGRES_DB changed: refused' wait_refused renamed-db
+  check 'POSTGRES_DB changed: says why' refused_with renamed-db 'POSTGRES_DB must not change after the first boot'
+
+  replace renamed-db rotated main drill-1 -e POSTGRES_PASSWORD='rotated-pass'
+  check 'password rotation: app ready' wait_ready rotated
+  check 'password rotation: health 200' http_ok rotated /api/v1/health
+  check 'password rotation: gateway-manage check passes' docker exec rotated gateway-manage check --database default
+}
+
+scenario_busy_crash() {
+  title '7. Crash right after a WAL segment filled up, then a restore across two timelines'
+  first_boot busy-1 busy drill-1
+  sql busy-1 'create table filler (x text)'
+  local start current
+  start=$(sql busy-1 'select pg_walfile_name(pg_current_wal_lsn())')
+  current=$start
+  until [[ "$current" > "$start" ]]; do
+    sql busy-1 "insert into filler select repeat('x', 200) from generate_series(1, 2000)"
+    current=$(sql busy-1 'select pg_walfile_name(pg_current_wal_lsn())')
+  done
+  # Segment $start was filled by writes (its last record runs into the next segment): crash once
+  # it is archived, before the next one is. The restore then promotes just before its end.
+  check 'filled segment archived' wait_archived busy-1 "$start"
+  docker kill -s KILL busy-1 >/dev/null
+  replace busy-1 busy-2 busy drill-1
+  check 'first restore' wait_log busy-2 'restore complete' 120
+  check 'app ready' wait_ready busy-2
+  add_platform busy-2 after-first-restore
+  check 'change after the first restore archived' switch_and_wait busy-2
+  docker kill -s KILL busy-2 >/dev/null
+  # Fall back to the timeline-1 base backup: the restore must replay all of timeline 2.
+  on_volume busy 'for d in /workspace/gateway-backup/base/*/; do grep -q "^00000002" "$d/COMPLETE" 2>/dev/null && rm -rf "$d"; done'
+  replace busy-2 busy-3 busy drill-1
+  check 'second restore' wait_log busy-3 'restore complete' 120
+  check 'app ready' wait_ready busy-3
+  check 'change after the first restore present' has_platform busy-3 after-first-restore
+  docker rm -f busy-3 >/dev/null
+}
+
 # --- main -------------------------------------------------------------------------------
 
 keep=0
@@ -247,6 +400,9 @@ else
   scenario_planned_stop
   scenario_crash
   scenario_status
+  scenario_retention
+  scenario_safety
+  scenario_busy_crash
 fi
 
 title "Done: $FAILURES failed check(s)"
