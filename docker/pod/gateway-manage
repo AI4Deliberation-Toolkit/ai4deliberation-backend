@@ -1,0 +1,8 @@
+#!/bin/bash
+# manage.py with the pod's environment, for SSH sessions (spec §7.4), e.g.
+#   gateway-manage createsuperuser
+set -euo pipefail
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+source "$GATEWAY_POD_ENV_FILE"
+cd "$APP_DIR"
+exec python manage.py "$@"

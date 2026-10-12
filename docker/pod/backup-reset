@@ -1,0 +1,23 @@
+#!/bin/bash
+# Moves the backup folder aside for a deliberate fresh start (spec §3.1; runbook "Refusals").
+# Only for a refused pod: on a running gateway it would cut off archiving, so it refuses.
+set -euo pipefail
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+
+if [ "${1:-}" != --yes ]; then
+  echo "usage: backup-reset --yes" >&2
+  echo "Moves $BACKUP_DIR aside (to $BACKUP_DIR.<UTC time>.aside); the next boot starts empty." >&2
+  exit 2
+fi
+if supervisord_running; then
+  echo "backup-reset: the gateway is running; only use this on a refused pod (runbook \"Refusals\")." >&2
+  exit 1
+fi
+if [ ! -d "$BACKUP_DIR" ]; then
+  echo "backup-reset: $BACKUP_DIR does not exist; nothing to do."
+  exit 0
+fi
+aside="$BACKUP_DIR.$(utc_stamp).aside"
+mv "$BACKUP_DIR" "$aside"
+echo "Moved $BACKUP_DIR to $aside."
+echo "Restart the container (kill 1) for a fresh start. Delete $aside once you no longer need it."
