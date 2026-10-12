@@ -222,3 +222,60 @@ wal_cutoff() {
   done
   printf '%s\n' "$best"
 }
+
+# --- boot decision (spec §4.2) ----------------------------------------------------------
+
+# Print one of: normal, restore, fresh, refuse-no-base. Read-only. An interrupted fresh init or
+# restore (cluster-in-progress) counts as an empty container disk.
+boot_decision() {
+  if [ -f "$PGDATA/PG_VERSION" ] && [ ! -e "$POD_STATE_DIR/cluster-in-progress" ]; then
+    echo normal
+  elif [ -n "$(newest_complete_backup "$BACKUP_DIR/base")" ]; then
+    echo restore
+  elif [ -z "$(ls -A "$BACKUP_DIR/wal" 2>/dev/null)" ]; then
+    echo fresh
+  else
+    echo refuse-no-base
+  fi
+}
+
+# --- volume owner (spec §4.3 rule 3) ----------------------------------------------------
+
+# owner_decision OWNER_CONTENT POD_ID TAKEOVER -> claim | continue | takeover | refuse
+owner_decision() {
+  local owner=$1 pod=$2 takeover=$3
+  if [ -z "$pod" ]; then echo refuse
+  elif [ -z "$owner" ]; then echo claim
+  elif [ "$owner" = "$pod" ]; then echo continue
+  elif [ -n "$takeover" ] && [ "$takeover" = "$owner" ]; then echo takeover
+  else echo refuse
+  fi
+}
+
+volume_owner() { cat "$BACKUP_DIR/OWNER" 2>/dev/null; }
+
+# Apply the owner rule at boot: claim or take over by writing RUNPOD_POD_ID; fail on a foreign owner.
+owner_check() {
+  local owner decision
+  owner=$(volume_owner)
+  decision=$(owner_decision "$owner" "${RUNPOD_POD_ID:-}" "${BACKUP_TAKEOVER:-}")
+  case "$decision" in
+    continue) return 0 ;;
+    refuse) return 1 ;;
+  esac
+  printf '%s\n' "$RUNPOD_POD_ID" > "$BACKUP_DIR/OWNER.tmp" && mv "$BACKUP_DIR/OWNER.tmp" "$BACKUP_DIR/OWNER" || return 1
+  if [ "$decision" = takeover ]; then
+    log "backup folder taken over from pod $owner (BACKUP_TAKEOVER)"
+  else
+    log "backup folder claimed by pod $RUNPOD_POD_ID"
+  fi
+}
+
+# Write-time fence: every write to the volume re-reads OWNER first (spec §4.3 rule 3).
+owner_fence() {
+  local owner
+  owner=$(volume_owner)
+  [ -n "$owner" ] && [ "$owner" = "${RUNPOD_POD_ID:-}" ] && return 0
+  log "OWNER FENCE: backup folder belongs to '${owner:-nobody}', this pod is '${RUNPOD_POD_ID:-}'; not writing" >&2
+  return 1
+}
