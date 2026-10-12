@@ -40,7 +40,6 @@ local_settings.py
 # Documentation
 docs/
 README.md
-LICENSE
 *.rst
 
 # Miscellaneous
