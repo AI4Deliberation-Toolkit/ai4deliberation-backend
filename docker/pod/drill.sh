@@ -88,6 +88,12 @@ refused_with() {  # grep on a variable: `docker logs | grep -q` fails under pipe
   return 1
 }
 
+not_in_log() {  # not_in_log NAME TEXT: TEXT appears nowhere in the container log
+  local logs
+  logs=$(docker logs "$1" 2>&1)
+  ! grep -qF -- "$2" <<< "$logs"
+}
+
 running() { [ "$(docker inspect -f '{{.State.Running}}' "$1" 2>/dev/null)" = true ]; }
 
 sql() { docker exec "$1" gosu postgres psql -XAtq -d gateway -c "$2"; }
@@ -343,6 +349,7 @@ EOF
   replace marker renamed main drill-1 -e POSTGRES_USER=renamed
   check 'POSTGRES_USER changed: refused' wait_refused renamed
   check 'POSTGRES_USER changed: says why' refused_with renamed 'POSTGRES_USER must not change after the first boot'
+  check 'POSTGRES_USER changed: password not in the log' not_in_log renamed "$PASSWORD"
 
   replace renamed renamed-db main drill-1 -e POSTGRES_DB=renamed
   check 'POSTGRES_DB changed: refused' wait_refused renamed-db

@@ -37,6 +37,14 @@ class EntrypointTests(SimpleTestCase):
         self.assertIn('ALTER ROLE :"usr" PASSWORD :\'pw\';', self.text)
         self.assertIn('-v pw="$POSTGRES_PASSWORD"', self.text)
 
+    def test_failed_password_statements_are_not_logged(self):
+        # psql fills in :'pw' client-side, so a failing ALTER/CREATE ROLE would put the password in
+        # the container log through log_min_error_statement (e.g. after POSTGRES_USER changed).
+        for statement in ('ALTER ROLE :"usr" PASSWORD', 'CREATE ROLE :"usr" LOGIN PASSWORD'):
+            with self.subTest(statement=statement):
+                before = self.text[:self.text.index(statement)]
+                self.assertTrue(before.rstrip().endswith("SET log_min_error_statement = 'PANIC';"))
+
     def test_hands_over_to_supervisord(self):
         self.assertTrue(self.text.rstrip().endswith('exec supervisord -n -c /usr/src/app/docker/pod/supervisord.conf'))
 

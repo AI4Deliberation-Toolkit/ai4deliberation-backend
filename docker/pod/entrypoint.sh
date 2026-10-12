@@ -53,8 +53,11 @@ temp_pg_stop() {  # temp_pg_stop fast|immediate
 }
 
 # The environment (a Runpod Secret) is authoritative, so the password can be rotated (spec §4.2).
+# psql fills in :'pw' before sending, so a failing statement would carry the password into the
+# container log (log_min_error_statement); the SET keeps it out for this session.
 apply_password() {
   psql_local -v usr="$POSTGRES_USER" -v pw="$POSTGRES_PASSWORD" <<'SQL'
+SET log_min_error_statement = 'PANIC';
 ALTER ROLE :"usr" PASSWORD :'pw';
 SQL
 }
@@ -107,6 +110,7 @@ fresh_init() {
   write_pg_conf || { FAILURE='could not write the Postgres settings'; return 1; }
   temp_pg_start wait off || { FAILURE='Postgres did not start (see its log above)'; return 1; }
   if ! psql_local -v usr="$POSTGRES_USER" -v pw="$POSTGRES_PASSWORD" -v db="$POSTGRES_DB" <<'SQL'
+SET log_min_error_statement = 'PANIC';
 CREATE ROLE :"usr" LOGIN PASSWORD :'pw';
 CREATE DATABASE :"db" OWNER :"usr";
 SQL
