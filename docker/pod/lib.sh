@@ -138,3 +138,87 @@ volume_ready() {
 supervisord_running() {
   [ -f "$SUPERVISORD_PIDFILE" ] && kill -0 "$(cat "$SUPERVISORD_PIDFILE")" 2>/dev/null
 }
+
+# --- base backups, dumps, retention (spec §5.3) -----------------------------------------
+
+# Complete base backups (stamp-named folders holding COMPLETE), newest first, one path per line.
+complete_backups() {
+  local dir
+  for dir in $(ls -1 "$1" 2>/dev/null | sort -r); do
+    [[ $dir =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && [ -f "$1/$dir/COMPLETE" ] && printf '%s\n' "$1/$dir"
+  done
+  return 0
+}
+
+# Print the stamp held in FILE, or nothing if the file is missing or doesn't hold one.
+read_stamp() {
+  local stamp
+  stamp=$(cat "$1" 2>/dev/null)
+  [[ $stamp =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && printf '%s\n' "$stamp"
+  return 0
+}
+
+newest_complete_backup() { complete_backups "$1" | head -n 1; }
+
+# Read backup_label on stdin, print the start WAL file name.
+start_wal_from_label() {
+  sed -n 's/^START WAL LOCATION: .* (file \([0-9A-F]\{24\}\))$/\1/p'
+}
+
+# base_backup_due BASE_DIR FLAG_FILE LAST_CYCLE_FILE NOW_EPOCH FORCE -> base | daily | none
+# The daily cycle (base backup, dump, retention, purge) runs when the last one is a day old,
+# however many base backups restores have taken since. A base backup alone is due after a fresh
+# init or restore (FLAG_FILE), when there is none, or when the daily one failed (newest a day old).
+base_backup_due() {
+  local base_dir=$1 flag=$2 last_cycle=$3 now=$4 force=$5 newest stamp
+  if [ "$force" = 1 ]; then echo daily; return; fi
+  stamp=$(read_stamp "$last_cycle")
+  if [ -z "$stamp" ] || [ $((now - $(stamp_to_epoch "$stamp"))) -ge "$DAY_SECONDS" ]; then
+    echo daily
+    return
+  fi
+  newest=$(newest_complete_backup "$base_dir")
+  if [ -e "$flag" ] || [ -z "$newest" ] ||
+     [ $((now - $(stamp_to_epoch "$(basename "$newest")"))) -ge "$DAY_SECONDS" ]; then
+    echo base
+  else
+    echo none
+  fi
+}
+
+# backups_to_delete BASE_DIR KEEP KEEP_SECONDS NOW_EPOCH: complete backups beyond the newest KEEP
+# that are also older than KEEP_SECONDS, and incomplete ones older than a day (younger ones may
+# still be in progress).
+backups_to_delete() {
+  local base_dir=$1 keep=$2 keep_seconds=$3 now=$4 dir
+  for dir in $(complete_backups "$base_dir" | tail -n +"$((keep + 1))"); do
+    if [ $((now - $(stamp_to_epoch "$(basename "$dir")"))) -gt "$keep_seconds" ]; then
+      printf '%s\n' "$dir"
+    fi
+  done
+  for dir in $(ls -1 "$base_dir" 2>/dev/null); do
+    [[ $dir =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
+    [ -f "$base_dir/$dir/COMPLETE" ] && continue
+    if [ $((now - $(stamp_to_epoch "$dir"))) -gt "$DAY_SECONDS" ]; then
+      printf '%s\n' "$base_dir/$dir"
+    fi
+  done
+}
+
+# dumps_to_delete DUMPS_DIR KEEP: dumps beyond the newest KEEP.
+dumps_to_delete() {
+  ls -1 "$1" 2>/dev/null | grep -E '^gateway-[0-9]{8}T[0-9]{6}Z\.dump$' | sort -r \
+    | tail -n +"$(($2 + 1))" | sed "s|^|$1/|"
+  return 0
+}
+
+# wal_cutoff BACKUP_DIR... : the start WAL with the lowest segment number among the given
+# backups, ignoring the timeline (the last 16 hex characters), as pg_archivecleanup compares.
+wal_cutoff() {
+  local dir name best=''
+  for dir in "$@"; do
+    name=$(<"$dir/COMPLETE")
+    if [ -z "$best" ] || [[ ${name:8} < ${best:8} ]]; then best=$name; fi
+  done
+  printf '%s\n' "$best"
+}
