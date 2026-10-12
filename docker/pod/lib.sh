@@ -279,3 +279,66 @@ owner_fence() {
   log "OWNER FENCE: backup folder belongs to '${owner:-nobody}', this pod is '${RUNPOD_POD_ID:-}'; not writing" >&2
   return 1
 }
+
+# --- restore (spec §4.4) ----------------------------------------------------------------
+
+# lsn_segment_suffix LSN -> the last 16 hex characters of the WAL file holding LSN.
+lsn_segment_suffix() {
+  local lsn=$1 value segno per_id
+  value=$(( (16#${lsn%/*} << 32) + 16#${lsn#*/} ))
+  segno=$((value / WAL_SEGMENT_BYTES))
+  per_id=$((0x100000000 / WAL_SEGMENT_BYTES))
+  printf '%08X%08X\n' $((segno / per_id)) $((segno % per_id))
+}
+
+# restore_complete WAL_DIR HISTORY_FILE: after a promotion, the new timeline's history file names
+# the parent timeline and the switch point. An archived parent-timeline segment past the one
+# holding the switch point means recovery stopped early: print it and fail.
+restore_complete() {
+  local wal_dir=$1 history=$2 line parent lsn tli switch name suffix exts late=()
+  line=$(grep -E '^[0-9]+[[:space:]]' "$history" | tail -n 1)
+  [ -n "$line" ] || { log "no timeline entry in $history" >&2; return 1; }
+  read -r parent lsn _ <<< "$line"
+  tli=$(printf '%08X' "$parent")
+  switch=$(lsn_segment_suffix "$lsn")
+  exts=${ARCHIVE_FORMATS// /|}
+  exts=${exts//./\\.}
+  for name in $(ls -1 "$wal_dir" 2>/dev/null); do
+    [[ $name =~ ^${tli}([0-9A-F]{16})\.(${exts})$ ]] || continue
+    suffix=${BASH_REMATCH[1]}
+    # At a segment boundary the switch point opens that segment, so an archived parent segment
+    # there was never replayed either.
+    if [[ $suffix > $switch ]] || { [ "$suffix" = "$switch" ] && [ $((16#${lsn#*/} % WAL_SEGMENT_BYTES)) = 0 ]; }; then
+      late+=("$name")
+    fi
+  done
+  if [ ${#late[@]} -gt 0 ]; then
+    log "recovery stopped at timeline $parent, ${lsn}; later archived segments: ${late[*]}" >&2
+    return 1
+  fi
+}
+
+# archived_file DIR NAME: print the path of NAME in any readable format; fail if absent.
+archived_file() {
+  local ext
+  for ext in $ARCHIVE_FORMATS; do
+    [ -f "$1/$2.$ext" ] && { printf '%s\n' "$1/$2.$ext"; return 0; }
+  done
+  return 1
+}
+
+# decompress FILE: write the content to stdout, choosing the tool by extension.
+decompress() {
+  case "$1" in
+    *.gz) gzip -dc -- "$1" ;;
+    *) log "unknown archive format: $1" >&2; return 2 ;;
+  esac
+}
+
+# extract_tar FILE DIR: unpack a base-backup archive, choosing the tool by extension.
+extract_tar() {
+  case "$1" in
+    *.tar.gz) tar -xzf "$1" -C "$2" ;;
+    *) log "unknown archive format: $1" >&2; return 2 ;;
+  esac
+}
