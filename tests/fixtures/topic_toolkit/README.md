@@ -3,6 +3,9 @@
 Written by hand from the toolkit's source at commit `5bcee4b`
 (`topic_extraction/views.py`, `ExtractConversationView`; taxonomy `2026-05-21-1`),
 not captured from a live run: no toolkit instance was reachable when they were made.
+Checked against the Runpod toolkit on 2026-10-12 with the live check below: it passed.
+The check covers only `extract_request.json` and the top-level keys and types of
+`extract_201.json`; the items inside `normalized` and the other fixtures were not checked.
 
 - `extract_request.json`: a request body for `POST /api/topics/extract-conversation`
 - `extract_201.json`: the success body (`include_labels` and `include_raw` off)
