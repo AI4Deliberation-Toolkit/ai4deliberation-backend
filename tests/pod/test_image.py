@@ -10,7 +10,8 @@ IMAGE_SCRIPTS = (
     'entrypoint.sh', 'app-start.sh', 'archive-wal.sh', 'restore-wal.sh', 'backup-loop.sh',
     'backup-status', 'backup-reset', 'gateway-manage',
 )
-SHELL_FILES = (*IMAGE_SCRIPTS, 'lib.sh')
+HOST_SCRIPTS = ('drill.sh',)  # run by hand on a machine with Docker
+SHELL_FILES = (*IMAGE_SCRIPTS, 'lib.sh', *HOST_SCRIPTS)
 OTHER_FILES = ('Dockerfile', 'supervisord.conf', 'postgresql.pod.conf')
 
 
@@ -27,7 +28,7 @@ class FilesTests(SimpleTestCase):
                 self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_scripts_are_executable_in_the_repo(self):
-        for name in IMAGE_SCRIPTS:
+        for name in (*IMAGE_SCRIPTS, *HOST_SCRIPTS):
             with self.subTest(name=name):
                 self.assertTrue(os.access(POD_DIR / name, os.X_OK))
 
