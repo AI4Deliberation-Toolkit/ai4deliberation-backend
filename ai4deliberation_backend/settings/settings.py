@@ -49,6 +49,9 @@ MIDDLEWARE = [
     'gateway.middleware.request_id_middleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.middleware.security.SecurityMiddleware',
+    # Serves collected static files (the pod has no nginx). Async-capable, unlike WhiteNoise's
+    # middleware, which would push every ASGI request through one thread.
+    'servestatic.middleware.ServeStaticMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
