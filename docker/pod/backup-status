@@ -1,0 +1,50 @@
+#!/bin/bash
+# Backup and archiving status, for SSH sessions (spec §5.4). Read-only.
+set -uo pipefail
+source "$(dirname "$(readlink -f "$0")")/lib.sh"
+[ -r "$GATEWAY_POD_ENV_FILE" ] && source "$GATEWAY_POD_ENV_FILE"
+
+NOW=$(date -u +%s)
+
+row() { printf '%-22s %s\n' "$1:" "$2"; }
+
+age() {  # age STAMP -> "STAMP (3h 12m ago)"
+  local s=$(( NOW - $(stamp_to_epoch "$1") ))
+  printf '%s (%dh %02dm ago)' "$1" $((s / 3600)) $((s % 3600 / 60))
+}
+
+status_file() { cat "$BACKUP_DIR/status/$1" 2>/dev/null || echo never; }
+
+sql() { as_postgres psql -X -At -d "${POSTGRES_DB:-postgres}" -c "$1" 2>/dev/null || echo '(Postgres not reachable)'; }
+
+row 'pod' "${RUNPOD_POD_ID:-unknown}"
+row 'volume owner' "$(volume_owner || echo none)"
+
+row 'last archived WAL' "$(sql "SELECT coalesce(last_archived_wal, 'none') || ' at ' || coalesce(to_char(last_archived_time AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '-') FROM pg_stat_archiver")"
+row 'last archive failure' "$(sql "SELECT coalesce(last_failed_wal, 'none') || ' at ' || coalesce(to_char(last_failed_time AT TIME ZONE 'UTC', 'YYYY-MM-DD HH24:MI:SS'), '-') || ' (' || failed_count || ' failures)' FROM pg_stat_archiver")"
+
+mapfile -t backups < <(complete_backups "$BACKUP_DIR/base")
+if [ ${#backups[@]} -gt 0 ]; then
+  row 'newest base backup' "$(age "$(basename "${backups[0]}")")"
+else
+  row 'newest base backup' none
+fi
+row 'base backups' "${#backups[@]} complete"
+
+mapfile -t dumps < <(ls -1 "$BACKUP_DIR/dumps" 2>/dev/null | grep -E '^gateway-.*\.dump$' | sort -r)
+if [ ${#dumps[@]} -gt 0 ]; then
+  newest=${dumps[0]#gateway-}
+  row 'newest dump' "$(age "${newest%.dump}")"
+else
+  row 'newest dump' none
+fi
+row 'dumps' "${#dumps[@]}"
+
+row 'database size' "$(sql "SELECT pg_size_pretty(pg_database_size(current_database()))")"
+row 'last daily cycle' "$(status_file last-cycle)"
+row 'last restore' "$(status_file last-restore)"
+row 'last purge' "$(status_file last-purge)"
+row 'archived WAL files' "$(find "$BACKUP_DIR/wal" -maxdepth 1 -name '*.gz' | wc -l) files, $(du -sh "$BACKUP_DIR/wal" 2>/dev/null | cut -f1)"
+
+flags=$(ls -1 "$POD_STATE_DIR" 2>/dev/null | grep -E '^(needs-base-backup|cluster-in-progress|restore-corrupt)$' | tr '\n' ' ')
+row 'flags' "${flags:-none}"
