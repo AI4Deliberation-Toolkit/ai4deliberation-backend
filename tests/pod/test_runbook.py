@@ -19,6 +19,14 @@ class RunbookTests(SimpleTestCase):
             with self.subTest(reason=reason):
                 self.assertIn(reason, self.text)
 
+    def test_restoring_the_newest_dump_is_spelled_out(self):
+        # Runbook §6.3: the app is stopped while the dump replaces the fresh database.
+        section = self.text[self.text.index('**Use the newest dump instead**'):self.text.index('## 7. Drills')]
+        stop = section.index('supervisorctl stop app')
+        restore = section.index('pg_restore --no-owner --role=gateway --clean --if-exists -d gateway')
+        self.assertLess(stop, restore)
+        self.assertLess(restore, section.index('supervisorctl start app'))
+
     def test_names_the_helper_commands(self):
         for command in ('backup-status', 'backup-reset --yes', 'gateway-manage createsuperuser', 'supervisorctl', 'BACKUP_TAKEOVER'):
             with self.subTest(command=command):

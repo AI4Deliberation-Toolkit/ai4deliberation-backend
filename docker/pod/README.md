@@ -214,9 +214,31 @@ The pod refused because a base backup or WAL file is damaged. Nothing has been c
     ```
 
     Don't use Stop → Start here: it erases the container disk, and with it the recovered data.
-  - **Use the newest dump instead** (at most a day old): `backup-reset --yes`, `kill 1`
-    (fresh start), then restore the dump into the empty `gateway` database as in §6.2, with
-    `--clean --if-exists`.
+  - **Use the newest dump instead** (at most a day old; changes after it are lost). First keep a
+    copy of the dump outside the backup folder, which `backup-reset` moves aside:
+
+    ```bash
+    source /usr/src/app/docker/pod/lib.sh
+    ls -1 "$BACKUP_DIR"/dumps/                      # pick the newest gateway-<UTC time>.dump
+    cp "$BACKUP_DIR/dumps/<file>" /root/restore.dump
+    backup-reset --yes
+    kill 1     # fresh start with an empty gateway database
+    ```
+
+    Once the pod is up again (the logs show `fresh init complete` and the app), connect over SSH
+    again and load the dump with the app stopped:
+
+    ```bash
+    source /usr/src/app/docker/pod/lib.sh
+    supervisorctl stop app
+    gosu postgres pg_restore --no-owner --role=gateway --clean --if-exists -d gateway < /root/restore.dump
+    touch "$POD_STATE_DIR/needs-base-backup"         # a base backup of the restored data at once
+    supervisorctl start app
+    backup-status
+    ```
+
+    `/root` is on the container disk: it survives `kill 1`, not Stop → Start. The `.aside` folder
+    still holds the dump too.
 
 ## 7. Drills
 
