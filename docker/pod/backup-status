@@ -31,7 +31,7 @@ else
 fi
 row 'base backups' "${#backups[@]} complete"
 
-mapfile -t dumps < <(ls -1 "$BACKUP_DIR/dumps" 2>/dev/null | grep -E '^gateway-.*\.dump$' | sort -r)
+mapfile -t dumps < <(ls -1 "$BACKUP_DIR/dumps" 2>/dev/null | grep -E '^gateway-[0-9]{8}T[0-9]{6}Z\.dump$' | sort -r)
 if [ ${#dumps[@]} -gt 0 ]; then
   newest=${dumps[0]#gateway-}
   row 'newest dump' "$(age "${newest%.dump}")"

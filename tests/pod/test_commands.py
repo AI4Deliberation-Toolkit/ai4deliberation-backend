@@ -53,3 +53,19 @@ class GatewayManageTests(PodTestCase):
         )
         self.assertEqual(out.returncode, 0, out.stderr)
         self.assertIn('System check identified no issues', out.stdout)
+
+
+class BackupStatusTests(PodTestCase):
+    def test_dumps_not_named_by_a_stamp_are_ignored(self):
+        # A hand-copied dump must not be read as the newest one and fed to the stamp parser.
+        dumps = self.pod.backup / 'dumps'
+        (dumps / 'gateway-20261012T100000Z.dump').write_bytes(b'')
+        (dumps / 'gateway-copy.dump').write_bytes(b'')
+        out = subprocess.run(
+            [str(POD_DIR / 'backup-status')], capture_output=True, text=True, timeout=30,
+            env={'PATH': os.environ['PATH'], **self.pod.env(GATEWAY_POD_ENV_FILE=str(self.pod.root / 'none.env'))},
+        )
+        rows = dict(line.split(':', 1) for line in out.stdout.splitlines() if ':' in line)
+        self.assertTrue(rows['newest dump'].strip().startswith('20261012T100000Z ('), out.stdout)
+        self.assertEqual(rows['dumps'].strip(), '1')
+        self.assertNotIn('invalid date', out.stderr)
