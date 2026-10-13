@@ -10,7 +10,7 @@ ENV PYTHONUNBUFFERED=1 \
 # postgresql-common first, so its createcluster.conf can turn off the unused default cluster
 # before postgresql-17 installs. procps gives pkill (Runpod crash drill).
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
+ && apt-get install -y --no-install-recommends ca-certificates curl \
  && install -d /usr/share/postgresql-common/pgdg \
  && curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
         -o /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc \

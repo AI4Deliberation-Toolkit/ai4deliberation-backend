@@ -63,6 +63,10 @@ class DockerfileTests(SimpleTestCase):
         self.assertIn('EXPOSE 8000', self.text)
         self.assertNotRegex(self.text, r'(?m)^CMD')
 
+    def test_no_unused_packages(self):
+        # apt reads the PGDG key as a plain .asc through signed-by; gnupg is never used.
+        self.assertNotIn('gnupg', self.text)
+
 
 class LicenceTests(SimpleTestCase):
     def test_eupl_licence_ships_in_the_image(self):
