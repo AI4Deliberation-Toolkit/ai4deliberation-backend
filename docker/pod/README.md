@@ -265,6 +265,7 @@ Locally, `docker/pod/drill.sh` runs the full drill against a Docker volume (spec
 | `POSTGRES_PASSWORD` | secret | Runpod Secret; applied on every boot, so you can rotate it: change the secret, then restart |
 | `POSTGRES_DB`, `POSTGRES_USER` | e.g. `gateway` | never change after the first boot |
 | `ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS` | leave unset | derived from the pod ID; set both only for a custom hostname (`ALLOWED_HOSTS` must then still list `127.0.0.1,localhost`) |
+| `USE_X_FORWARDED_HOST` | leave unset | `true` in the pod: Runpod's proxy sends the pod's internal address as `Host` and the public host as `X-Forwarded-Host`, which is still checked against `ALLOWED_HOSTS` |
 | `GATEWAY_ENABLE_STUB`, `GATEWAY_STUB_KEY` | optional | stub off by default |
 | `GUNICORN_WORKERS` | optional | default 2 |
 | `BACKUP_TAKEOVER` | only when replacing the pod | §4 |

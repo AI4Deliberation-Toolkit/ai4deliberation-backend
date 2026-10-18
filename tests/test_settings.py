@@ -22,7 +22,7 @@ REQUIRED = {
 }
 OPTIONAL = (
     'DEBUG', 'POSTGRES_DB', 'POSTGRES_HOST', 'CORS_ALLOWED_ORIGINS', 'CSRF_TRUSTED_ORIGINS',
-    'GATEWAY_ENABLE_STUB',
+    'GATEWAY_ENABLE_STUB', 'USE_X_FORWARDED_HOST',
 )
 
 # Environment variables only: a stray .env file in the repo root can't leak into the values
@@ -83,6 +83,13 @@ class StagingSettingsTests(SimpleTestCase):
         staging = load_staging(CSRF_TRUSTED_ORIGINS='https://ai4deliberation-back-dev.konnekt-able.com')
         self.assertEqual(staging.CSRF_TRUSTED_ORIGINS, ['https://ai4deliberation-back-dev.konnekt-able.com'])
 
+    def test_forwarded_host_is_ignored_by_default(self):
+        # Staging's nginx passes the public Host through; only the pod's proxy needs this.
+        self.assertIs(load_staging().USE_X_FORWARDED_HOST, False)
+
+    def test_forwarded_host_can_be_turned_on(self):
+        self.assertIs(load_staging(USE_X_FORWARDED_HOST='true').USE_X_FORWARDED_HOST, True)
+
     def test_database_name_and_host_default_to_the_current_deploy(self):
         db = load_staging().DATABASES['default']
         self.assertEqual((db['NAME'], db['HOST']), ('postgres', 'db'))
@@ -118,6 +125,23 @@ class BaseSettingsTests(SimpleTestCase):
 
     def test_body_limit_is_10_mb(self):
         self.assertEqual(base.DATA_UPLOAD_MAX_MEMORY_SIZE, 10 * 1024 * 1024)
+
+
+PROXY_HOST = 'abc123-8000.proxy.runpod.net'
+
+
+@override_settings(USE_X_FORWARDED_HOST=True, ALLOWED_HOSTS=[PROXY_HOST, '127.0.0.1', 'localhost'])
+class ForwardedHostTests(TestCase):
+    """Runpod's proxy sends the pod's internal address as Host and the public one as X-Forwarded-Host."""
+
+    def test_a_request_through_the_runpod_proxy_is_accepted(self):
+        response = self.client.get('/api/v1/health', HTTP_HOST='100.65.32.20:60828', HTTP_X_FORWARDED_HOST=PROXY_HOST)
+        self.assertEqual(response.status_code, 200)
+
+    def test_a_forwarded_host_not_in_allowed_hosts_is_still_rejected(self):
+        with self.assertLogs('django.security.DisallowedHost', 'ERROR'):
+            response = self.client.get('/api/v1/health', HTTP_HOST=PROXY_HOST, HTTP_X_FORWARDED_HOST='evil.example.org')
+        self.assertEqual(response.status_code, 400)
 
 
 @override_settings(DEBUG=False)

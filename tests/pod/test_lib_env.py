@@ -37,6 +37,14 @@ class DefaultsTests(PodTestCase):
         out = self.lib('apply_defaults; echo "$POSTGRES_PORT $GUNICORN_WORKERS"', POSTGRES_PORT='5433', GUNICORN_WORKERS='4')
         self.assertEqual(out.stdout.strip(), '5433 4')
 
+    def test_the_proxy_forwarded_host_is_trusted_by_default(self):
+        # Runpod's proxy sends the pod's internal address as Host, the public one as X-Forwarded-Host.
+        out = self.lib('apply_defaults; env | grep ^USE_X_FORWARDED_HOST=')
+        self.assertEqual(out.stdout.strip(), 'USE_X_FORWARDED_HOST=true')
+
+    def test_the_forwarded_host_reaches_ssh_sessions(self):
+        self.assertIn('USE_X_FORWARDED_HOST', self.lib('echo "${POD_ENV_VARS[*]}"').stdout.split())
+
     def test_backup_dir_defaults_to_the_volume(self):
         out = run_bash('echo "$BACKUP_DIR"')
         self.assertEqual(out.stdout.strip(), '/workspace/gateway-backup')

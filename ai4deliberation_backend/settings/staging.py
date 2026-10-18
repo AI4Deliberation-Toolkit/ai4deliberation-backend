@@ -22,6 +22,11 @@ CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='', cast=Csv())
 # backend port is reachable solely through the edge.)
 CSRF_TRUSTED_ORIGINS = config('CSRF_TRUSTED_ORIGINS', default='', cast=Csv())
 
+# Runpod's proxy sends the pod's internal address as Host and the public host as
+# X-Forwarded-Host; the pod image turns this on. The forwarded host is still checked
+# against ALLOWED_HOSTS. Staging's nginx passes the public Host through, so it stays off there.
+USE_X_FORWARDED_HOST = config('USE_X_FORWARDED_HOST', default=False, cast=bool)
+
 POSTGRES_USER = config('POSTGRES_USER')
 POSTGRES_PASSWORD = config('POSTGRES_PASSWORD')
 POSTGRES_PORT = config('POSTGRES_PORT')
