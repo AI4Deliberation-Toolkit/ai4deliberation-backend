@@ -8,6 +8,8 @@ import time
 
 import httpx
 from cryptography.fernet import InvalidToken
+from django.conf import settings
+from django.core.exceptions import TooManyFieldsSent
 from django.http import HttpResponse
 
 from gateway import http
@@ -79,12 +81,17 @@ def _recording_errors(record: CallRecord, tool_id: str):
 
 
 def _read_params(request) -> dict[str, str]:
+    try:
+        query = request.GET
+    except TooManyFieldsSent:  # over DATA_UPLOAD_MAX_NUMBER_FIELDS; unhandled, a 500 plus a traceback
+        raise GatewayError(INVALID_REQUEST, 'Too many query parameters '
+                                            f'(at most {settings.DATA_UPLOAD_MAX_NUMBER_FIELDS}).') from None
     # Names only in the message: query values are input, never echoed.
-    repeated = sorted(name for name, values in request.GET.lists() if len(values) > 1)
+    repeated = sorted(name for name, values in query.lists() if len(values) > 1)
     if repeated:
         raise GatewayError(INVALID_REQUEST, f'Repeated query parameter(s): {", ".join(repeated)}. '
                                             'Give each parameter once.')
-    return dict(request.GET.items())
+    return dict(query.items())
 
 
 async def _find_tool(tool_id: str, operation: str, *, read: bool) -> tuple[Tool, Adapter]:

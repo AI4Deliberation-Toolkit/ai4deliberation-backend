@@ -1,7 +1,7 @@
 import httpx
 from asgiref.sync import sync_to_async
 
-from gateway.models import Tool
+from gateway.models import CallLog, Tool
 from tests.gateway.support import GatewayTestCase, assert_gateway_error, capture_logs, load_fixture, reply_json
 
 ETAG = '"v1-el"'
@@ -76,6 +76,14 @@ class ReadRouteTests(GatewayTestCase):
                 error = assert_gateway_error(self, response, 422, 'INVALID_REQUEST')
                 self.assertIn('a', error['message'])
         self.assertEqual(self.tool_requests, [])
+
+    async def test_too_many_parameters_is_422_not_a_500(self):
+        with self.assertNoLogs('gateway.errors'):  # no traceback per request
+            response = await self.read('stub', 'query', {f'p{i}': '1' for i in range(1001)})
+        error = assert_gateway_error(self, response, 422, 'INVALID_REQUEST')
+        self.assertIn('Too many query parameters', error['message'])
+        self.assertEqual(self.tool_requests, [])
+        self.assertEqual(await CallLog.objects.values_list('status', 'error_code').aget(), (422, 'INVALID_REQUEST'))
 
     async def test_get_on_a_write_operation_is_405(self):
         response = await self.read('stub', 'echo')
