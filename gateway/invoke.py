@@ -54,6 +54,7 @@ async def invoke_read(request, tool_id: str, operation: str, response: HttpRespo
             if if_none_match is None:
                 raise GatewayError(TOOL_BAD_RESPONSE)
             not_modified = HttpResponse(status=304)
+            del not_modified['Content-Type']  # Django's default; a 304 carries no representation metadata
             if etag is not None:
                 not_modified['ETag'] = etag
             record.error_code = record.error_source = None

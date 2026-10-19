@@ -64,6 +64,7 @@ class ReadRouteTests(GatewayTestCase):
         self.tool_reply = lambda request: httpx.Response(304, headers={'ETag': ETAG})
         response = await self.read('stub', 'query', headers={'If-None-Match': ETAG})
         self.assertEqual((response.status_code, response.content, response['ETag']), (304, b'', ETAG))
+        self.assertNotIn('Content-Type', response)  # RFC 9110 §15.4.5: no representation metadata
 
     async def test_304_without_if_none_match_is_a_bad_response(self):
         self.tool_reply = lambda request: httpx.Response(304, headers={'ETag': ETAG})
@@ -122,6 +123,12 @@ class ReadRouteTests(GatewayTestCase):
                 response = await self.read('stub', 'query', headers={'If-None-Match': ETAG})
                 self.assertEqual(response['Cache-Control'], 'no-store')
         self.assertEqual((await self.read('stub', 'query', key=None))['Cache-Control'], 'no-store')
+
+    async def test_head_answers_are_never_cacheable_either(self):
+        with capture_logs('django.request'):
+            response = await self.async_client.head('/api/v1/tools/stub/query', headers={'X-Gateway-Key': self.key})
+        self.assertEqual(response['Cache-Control'], 'no-store')
+        self.assertEqual(self.tool_requests, [])
 
     async def test_writes_carry_no_conditional_headers(self):  # Review Focus 4
         self.tool_reply = lambda request: httpx.Response(200, json={'output': {}}, headers={'ETag': ETAG})

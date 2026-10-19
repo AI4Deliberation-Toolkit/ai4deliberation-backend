@@ -70,7 +70,7 @@ def _finish(request, response, started: float):
     """Set the headers, then log the call. Return the CallRecord to store, if any."""
     response['X-Request-Id'] = request.request_id
     match = _unified_match(request)
-    if match is not None and request.method == 'GET':
+    if match is not None and request.method in ('GET', 'HEAD'):
         # Every read answer, errors included (they come from Ninja's handlers, outside the view):
         # it is for one authenticated caller, so no proxy or browser may store it.
         response['Cache-Control'] = 'no-store'
