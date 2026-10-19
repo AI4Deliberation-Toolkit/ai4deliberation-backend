@@ -25,7 +25,8 @@ separate and unchanged: it still deploys from GitLab with `docker-compose-stagin
 - Access to the project's Runpod account, with your SSH public key added under Settings → SSH Public Keys.
 - The image tag to deploy: `ghcr.io/ai4deliberation-toolkit/ai4deliberation-backend-pod:<short sha>`,
   built by the `pod-image` GitHub Actions workflow on every push to `main`. Use the short-SHA tag,
-  never `:latest`, so the pod changes only when you edit it.
+  never `:latest`, so the pod changes only when you edit it. The package is public, so Runpod
+  pulls it without registry credentials.
 - A Fernet key for `GATEWAY_ENCRYPTION_KEYS`:
   `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
   **Keep a copy outside Runpod** (the team password manager). Without it, the tool keys in a
@@ -35,6 +36,7 @@ separate and unchanged: it still deploys from GitLab with `docker-compose-stagin
 
 1. **Secrets.** In Runpod → Secrets, create `gateway_secret_key` (a long random string),
    `gateway_encryption_keys` (the Fernet key) and `gateway_postgres_password` (a long random string).
+   With the stub, also `gateway_stub_key` (a long random string).
 2. **Network volume.** Storage → New Network Volume: an EU datacenter that offers CPU pods, Secure
    Cloud, 10 GB. The pod has to run in this datacenter for good.
 3. **Pod.** Deploy a CPU pod in that datacenter, with the network volume attached (a volume can
@@ -52,8 +54,13 @@ separate and unchanged: it still deploys from GitLab with `docker-compose-stagin
      | `POSTGRES_DB` | `gateway` |
      | `POSTGRES_USER` | `gateway` |
 
-     Leave `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` unset: they're derived from the pod ID. If
-     the secret references don't resolve (check the logs), use the plain values instead.
+     With the stub, add `GATEWAY_ENABLE_STUB` = `true` and `GATEWAY_STUB_KEY` =
+     `{{ RUNPOD_SECRET_gateway_stub_key }}`.
+
+     Leave `ALLOWED_HOSTS` and `CSRF_TRUSTED_ORIGINS` unset: they're derived from the pod ID. The
+     secret references resolve (checked on the first deploy, 2026-10-18). If they ever stop
+     resolving (check over SSH: `tr '\0' '\n' < /proc/1/environ | grep -c RUNPOD_SECRET` prints `0`
+     when they resolve), use the plain values instead.
 4. **Logs.** In the pod's logs, expect `boot decision: fresh`, `fresh init complete`, supervisord
    starting `postgres`, `backup` and `app`, then `base backup complete` within about a minute.
 5. **Admin user.** Connect with the SSH command the pod's Connect tab shows
@@ -244,13 +251,24 @@ The pod refused because a base backup or WAL file is damaged. Nothing has been c
 
 Run these after the first deploy and after big changes to the image.
 
-1. **Edit Pod:** change nothing but save (or redeploy the same tag). The data is still there afterwards.
+1. **Edit Pod:** Runpod won't save an unchanged pod, so make a change with no effect: add
+   `GUNICORN_WORKERS=2` (the default), or remove it if it's already there. The data is still there afterwards.
 2. **Stop → Start:** the data is still there afterwards.
 3. **Crash:** write a row (e.g. a test platform in the admin), wait more than 70 s, write a second
    row. Over SSH, `pkill -STOP -u postgres` freezes Postgres and its archiver, so the graceful
    shutdown can't finish. Then Stop Pod: Runpod's kill fires about 15 s later. After Start, the
    first row is there; the second may be missing.
-4. `backup-status` looks sane, and `last restore` shows the restore time.
+4. `backup-status` looks sane, and `last restore` shows the restore time. After every restore,
+   `last archive failure` names the new timeline's `.history` file with one failure. That's
+   expected: archiving is blocked on purpose while the restore runs, and the file is archived
+   seconds later by the regular Postgres. It's only a problem if `last archived WAL` is older
+   than the failure.
+
+Measured on Runpod (pod `r4k4bs0w6yyryd`, image `9642d03`, 2026-10-18/19): every restore took
+4 s (Edit Pod twice, Stop → Start, crash). In the crash drill, the first row survived and the second
+was lost. Archiving to the network volume works: a manual `pg_switch_wal()` was archived at once.
+`kill 1` restarts the container with its disk (§5). The SSH session has the pod's environment
+(`RUNPOD_POD_ID` is set).
 
 Locally, `docker/pod/drill.sh` runs the full drill against a Docker volume (spec §9.2).
 
