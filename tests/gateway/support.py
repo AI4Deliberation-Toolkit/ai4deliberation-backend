@@ -136,14 +136,20 @@ class GatewayTestCase(TestCase):
         self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
         return response
 
-    async def read(self, tool_id, operation, params=None, *, key=_OWN_KEY, headers=None):
-        """A GET on the unified route. A list value in `params` repeats the parameter."""
+    async def read(self, tool_id, operation, params=None, *, key=_OWN_KEY, headers=None, quiet_request_log=True):
+        """A GET on the unified route. A list value in `params` repeats the parameter.
+
+        With quiet_request_log=False, django.request records reach the test's own assertLogs, and their
+        count isn't checked.
+        """
         request_headers = dict(headers or {})
         key = self.key if key is _OWN_KEY else key
         if key is not None:
             request_headers['X-Gateway-Key'] = key
-        with capture_logs('django.request') as records:
+        capture = capture_logs('django.request') if quiet_request_log else contextlib.nullcontext()
+        with capture as records:
             response = await self.async_client.get(f'/api/v1/tools/{tool_id}/{operation}', params or {},
                                                    headers=request_headers)
-        self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
+        if quiet_request_log:
+            self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
         return response

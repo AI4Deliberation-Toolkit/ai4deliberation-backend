@@ -3,7 +3,7 @@ import logging
 import sys
 
 from django.conf import settings
-from django.test import SimpleTestCase
+from django.test import RequestFactory, SimpleTestCase
 
 from gateway.logging_filters import REDACTED, RedactingFilter, redact_text, register_sensitive_header
 
@@ -34,6 +34,7 @@ class RedactionTests(SimpleTestCase):
             'Authorization: Bearer tok123': 'tok123',
             "{'X-Api-Key': 'quoted-secret'}": 'quoted-secret',
             'X-User-Context: user-42-context': 'user-42-context',
+            'If-None-Match: "etag-secret-42"': 'etag-secret-42',
         }
         for text, secret in cases.items():
             with self.subTest(text=text):
@@ -119,6 +120,14 @@ class RedactionTests(SimpleTestCase):
         self.assertNotIn(KEY, record.exc_text)
         self.assertIn('ValueError', record.exc_text)
 
+    def test_request_attribute_is_reduced_to_the_path(self):
+        record = logging.LogRecord('django.request', logging.WARNING, __file__, 1, 'Not Found: %s', ('/p',), None)
+        record.request = RequestFactory().get('/api/v1/tools/stub/query', {'q': 'SENTINEL-Q'})
+        RedactingFilter().filter(record)
+        RedactingFilter().filter(record)  # a second filter (logger, then handler) is harmless
+        self.assertEqual(record.request, '/api/v1/tools/stub/query')
+        self.assertNotIn('SENTINEL-Q', repr(vars(record)))
+
     def test_ordinary_text_is_untouched(self):
         text = 'tool topic-toolkit answered 201 in 812 ms'
         self.assertEqual(filtered(text).getMessage(), text)
@@ -131,6 +140,10 @@ class LoggingConfigTests(SimpleTestCase):
                 self.assertIn('redact_secrets', handler.get('filters', []))
         root_filters = [f for h in logging.getLogger().handlers for f in h.filters]
         self.assertTrue(any(isinstance(f, RedactingFilter) for f in root_filters))
+
+    def test_django_request_logger_is_filtered_before_any_handler(self):
+        self.assertIn('redact_secrets', settings.LOGGING['loggers']['django.request']['filters'])
+        self.assertTrue(any(isinstance(f, RedactingFilter) for f in logging.getLogger('django.request').filters))
 
     def test_httpx_and_httpcore_are_pinned_to_warning(self):
         for name in ('httpx', 'httpcore'):

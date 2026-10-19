@@ -15,7 +15,7 @@ REDACTED = '[REDACTED]'
 GATEWAY_KEY_PATTERN = r'gw_[A-Z2-7]{8}_[0-9a-f]{64}'
 _GATEWAY_KEY_RE = re.compile(GATEWAY_KEY_PATTERN)
 
-_BASE_HEADERS = frozenset({'x-gateway-key', 'x-api-key', 'authorization', 'x-user-context'})
+_BASE_HEADERS = frozenset({'x-gateway-key', 'x-api-key', 'authorization', 'x-user-context', 'if-none-match'})
 _tool_headers: set[str] = set()
 
 
@@ -86,6 +86,13 @@ class RedactingFilter(logging.Filter):
         for name, value in list(vars(record).items()):
             if name not in ('msg', 'args') and isinstance(value, dict):
                 setattr(record, name, _redact_dict(value))
+        request = getattr(record, 'request', None)
+        if hasattr(request, 'path'):
+            # django.request records carry the HttpRequest, whose repr includes the query string (read
+            # inputs). Keep only the path. Idempotent: a string is left alone. This breaks Django's
+            # AdminEmailHandler (it calls record.request.build_absolute_uri()); it isn't configured
+            # here and must not be added without revisiting this.
+            record.request = request.path
         if record.exc_info and not record.exc_text:
             record.exc_text = redact_text(logging.Formatter().formatException(record.exc_info))
         return True

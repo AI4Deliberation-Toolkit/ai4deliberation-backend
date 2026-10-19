@@ -173,6 +173,9 @@ LOGGING = {
     'loggers': {
         # Replace Django's default handlers so everything goes through the filtered console handler.
         'django': {'handlers': [], 'level': 'INFO', 'propagate': True},
+        # Its records carry the request (query string included): filter them on the logger, before any
+        # handler sees them, including handlers added later or by tests.
+        'django.request': {'filters': ['redact_secrets']},
         # httpx logs full URLs at INFO and httpcore logs response headers at DEBUG (spec §8.3).
         'httpx': {'level': 'WARNING'},
         'httpcore': {'level': 'WARNING'},

@@ -3,7 +3,7 @@ import logging
 import httpx
 
 from gateway.models import CallLog
-from tests.gateway.support import GatewayTestCase
+from tests.gateway.support import GatewayTestCase, reply_json
 
 BODY = 'SENTINEL-BODY-5f1c'
 CONTEXT = 'SENTINEL-USER-CONTEXT-8a2e'
@@ -11,12 +11,15 @@ TOOL_KEY = 'SENTINEL-TOOL-KEY-c39d'
 METADATA = 'SENTINEL-METADATA-77b0'
 ERROR_BODY = 'SENTINEL-ERROR-BODY-e41a'
 CLIENT_IP = '203.0.113.77'
+QUERY = 'SENTINEL-QUERY-9d3b'
+INM = 'SENTINEL-IF-NONE-MATCH-41f0'
 
 
-class PrivacyTests(GatewayTestCase):
+class PrivacyChecks:
+    """The sentinel checks, shared as a mixin: subclassing PrivacyTests would run its tests twice."""
+
     def setUp(self):
         super().setUp()
-        self.make_stub_tool(tool_key=TOOL_KEY)
         # GatewayTestCase silences gateway.access; here the root capture must see it too.
         access_logger = logging.getLogger('gateway.access')
         base_scope = self.async_client._base_scope
@@ -39,6 +42,12 @@ class PrivacyTests(GatewayTestCase):
             for haystack in haystacks:
                 with self.subTest(needle=needle):
                     self.assertNotIn(needle, haystack)
+
+
+class PrivacyTests(PrivacyChecks, GatewayTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_stub_tool(tool_key=TOOL_KEY)
 
     async def test_success_path_stores_and_logs_no_content(self):
         self.tool_reply = lambda request: httpx.Response(200, json={
@@ -80,3 +89,35 @@ class PrivacyTests(GatewayTestCase):
             await self.call('stub', 'echo', {'input': {'text': BODY}}, key=wrong_key)
         self.assertEqual(await CallLog.objects.acount(), 0)
         self.assert_absent((wrong_key, BODY, CLIENT_IP), self.logged_text(logs))
+
+
+class ReadPrivacyTests(PrivacyChecks, GatewayTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_reader_stub_tool(tool_key=TOOL_KEY)
+
+    async def read_and_capture(self, params, reply):
+        self.tool_reply = reply
+        with self.assertLogs(level='DEBUG') as logs:
+            response = await self.read('stub', 'query', params, quiet_request_log=False,
+                                       headers={'If-None-Match': INM, 'X-User-Context': CONTEXT})
+        return response, logs
+
+    async def test_read_success_stores_and_logs_no_query_values(self):
+        response, logs = await self.read_and_capture({'text': QUERY}, reply_json(200, {'output': {'echo': QUERY}}))
+        self.assertEqual(response.status_code, 200)
+        sent = self.tool_requests[0]
+        self.assertEqual((sent.url.params['text'], sent.headers['If-None-Match']), (QUERY, INM))  # it really flowed
+        self.assert_absent((*self.secrets(), QUERY, INM), await self.stored_text(), self.logged_text(logs))
+
+    async def test_mirrored_tool_error_logs_no_query_values(self):
+        response, logs = await self.read_and_capture({'text': QUERY}, reply_json(404, {'detail': ERROR_BODY}))
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))  # the record was seen
+        self.assert_absent((*self.secrets(), QUERY, INM, ERROR_BODY), await self.stored_text(), self.logged_text(logs))
+
+    async def test_repeated_parameter_422_logs_no_query_values(self):
+        response, logs = await self.read_and_capture({'text': [QUERY, QUERY]}, reply_json(200, {'output': {}}))
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        self.assert_absent((*self.secrets(), QUERY, INM), await self.stored_text(), self.logged_text(logs))
