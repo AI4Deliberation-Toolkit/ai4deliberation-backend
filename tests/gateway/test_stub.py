@@ -73,10 +73,29 @@ class StubBehaviourTests(TestCase):
             self.assertEqual((await self.echo(headers={'X-API-Key': 'wrong'})).status_code, 401)
             self.assertEqual((await self.echo(headers={'X-API-Key': 'right-key'})).status_code, 200)
 
-    async def test_post_only_and_echo_only(self):
+    async def test_query(self):
+        response = await self.async_client.get('/stub/query', {'a': '1', 'b': 'x y'})
+        self.assertEqual((response.status_code, response['ETag']), (200, '"stub-1"'))
+        self.assertEqual(response.json(), {'output': {'query': {'a': '1', 'b': 'x y'}},
+                                           'metadata': {'tool_version': 'stub-1', 'model_id': 'none'}})
+
+    async def test_query_revalidates(self):
+        response = await self.async_client.get('/stub/query', headers={'If-None-Match': '"stub-1"'})
+        self.assertEqual((response.status_code, response.content, response['ETag']), (304, b'', '"stub-1"'))
+        self.assertEqual((await self.async_client.get('/stub/query', headers={'If-None-Match': '"x"'})).status_code, 200)
+
+    async def test_methods(self):
         self.assertEqual((await self.async_client.get('/stub/echo')).status_code, 405)
+        self.assertEqual((await self.async_client.post('/stub/query', '{}', content_type='application/json')).status_code, 405)
+        self.assertEqual((await self.async_client.put('/stub/echo')).status_code, 405)
         response = await self.async_client.post('/stub/other', '{"input": {}}', content_type='application/json')
         self.assertEqual(response.status_code, 404)
+
+    async def test_stub_key_guards_reads_too(self):
+        with override_settings(GATEWAY_STUB_KEY='right-key'):
+            self.assertEqual((await self.async_client.get('/stub/query')).status_code, 401)
+            response = await self.async_client.get('/stub/query', headers={'X-API-Key': 'right-key'})
+            self.assertEqual(response.status_code, 200)
 
     async def test_bad_body_is_400(self):
         for raw in ('not json', '[]', '{"input": 3}', '{}'):

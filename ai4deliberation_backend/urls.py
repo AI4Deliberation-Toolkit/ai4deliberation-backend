@@ -31,7 +31,7 @@ def build_urlpatterns():
     ]
     if settings.GATEWAY_ENABLE_STUB:
         # Registered in admin like any tool: tool_id=stub, depth=native, adapter=native,
-        # base_url=http://127.0.0.1:8000/stub, operations=["echo"].
+        # base_url=http://127.0.0.1:8000/stub, operations=["echo", "query"], read_operations=["query"].
         patterns.append(path('stub/<slug:operation>', stub_view))
     # Admin static files under uvicorn in local dev; empty unless DEBUG.
     patterns += staticfiles_urlpatterns()
