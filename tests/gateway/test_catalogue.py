@@ -72,3 +72,4 @@ class CatalogueTests(GatewayTestCase):
         for path in ('/api/v1/health', '/api/v1/tools', '/api/v1/tools/{tool_id}', '/api/v1/tools/{tool_id}/{operation}'):
             with self.subTest(path=path):
                 self.assertIn(path, schema['paths'])
+        self.assertGreaterEqual(set(schema['paths']['/api/v1/tools/{tool_id}/{operation}']), {'get', 'post'})

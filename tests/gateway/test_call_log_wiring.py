@@ -258,3 +258,37 @@ class ClientDisconnectTests(GatewayTestCase):
         fields = await self.disconnect_while_hanging_in('auth', [(b'x-gateway-key', UNKNOWN_KEY.encode())])
         self.assertEqual(await CallLog.objects.acount(), 0)
         self.assertEqual(fields[1:5], ['-', 'stub', 'echo', '499'])
+
+
+class ReadCallLogTests(GatewayTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_reader_stub_tool()
+
+    async def test_get_and_post_each_get_one_access_line_and_one_row(self):
+        with self.assertLogs('gateway.access', 'INFO') as logs:
+            await self.call('stub', 'echo')
+            await self.read('stub', 'query')
+        self.assertEqual([r.getMessage().split(' ')[2:5] for r in logs.records],
+                         [['stub', 'echo', '200'], ['stub', 'query', '200']])
+        self.assertEqual([r.operation async for r in CallLog.objects.order_by('created_at', 'id')], ['echo', 'query'])
+
+    async def test_read_row(self):
+        self.tool_reply = reply_json(200, {'output': {'x': 1}})
+        await self.read('stub', 'query', {'a': '1'})
+        row = await CallLog.objects.aget()
+        self.assertEqual((row.status, row.error_code, row.tool_status, row.request_bytes), (200, None, 200, 0))
+        self.assertEqual(row.response_bytes, len(httpx.Response(200, json={'output': {'x': 1}}).content))
+
+    async def test_304_row(self):
+        self.tool_reply = lambda request: httpx.Response(304, headers={'ETag': '"v"'})
+        await self.read('stub', 'query', headers={'If-None-Match': '"v"'})
+        row = await CallLog.objects.aget()
+        self.assertEqual((row.status, row.error_code, row.error_source, row.tool_status, row.response_bytes),
+                         (304, None, None, 304, 0))
+
+    async def test_method_not_allowed_and_repeated_parameter_rows(self):
+        await self.read('stub', 'echo')
+        await self.read('stub', 'query', {'a': ['1', '2']})
+        rows = [(r.status, r.error_code) async for r in CallLog.objects.order_by('created_at', 'id')]
+        self.assertEqual(rows, [(405, 'METHOD_NOT_ALLOWED'), (422, 'INVALID_REQUEST')])

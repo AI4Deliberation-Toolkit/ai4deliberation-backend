@@ -35,7 +35,7 @@ def request_id_middleware(get_response):
                 response = await get_response(request)
             except asyncio.CancelledError:
                 # Django's ASGIHandler cancels the request task on http.disconnect: still log the call.
-                record = _log_call(request, CLIENT_DISCONNECTED_STATUS, started)
+                record = _log_call(request, _unified_match(request), CLIENT_DISCONNECTED_STATUS, started)
                 if record is not None:
                     record.error_code, record.error_source = CLIENT_DISCONNECTED, 'gateway'
                     await write_call_log(record)
@@ -67,15 +67,26 @@ def _loggable(segment: str) -> str:
 
 
 def _finish(request, response, started: float):
-    """Set the header, then log the call. Return the CallRecord to store, if any."""
+    """Set the headers, then log the call. Return the CallRecord to store, if any."""
     response['X-Request-Id'] = request.request_id
-    return _log_call(request, response.status_code, started)
+    match = _unified_match(request)
+    if match is not None and request.method == 'GET':
+        # Every read answer, errors included (they come from Ninja's handlers, outside the view):
+        # it is for one authenticated caller, so no proxy or browser may store it.
+        response['Cache-Control'] = 'no-store'
+    return _log_call(request, match, response.status_code, started)
 
 
-def _log_call(request, status: int, started: float):
-    """For the unified route, write the access line with this status. Return the CallRecord to store, if any."""
+def _unified_match(request):
+    """The request's ResolverMatch if it resolved to the unified route (either method), else None."""
     match = getattr(request, 'resolver_match', None)
-    if match is None or match.view_name != UNIFIED_ROUTE:
+    return match if match is not None and match.view_name == UNIFIED_ROUTE else None
+
+
+def _log_call(request, match, status: int, started: float):
+    """For the unified route (`match` not None), write the access line with this status.
+    Return the CallRecord to store, if any."""
+    if match is None:
         return None
     duration_ms = int((time.perf_counter() - started) * 1000)
     api_key = getattr(request, 'auth', None)  # set by Ninja only after successful auth

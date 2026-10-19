@@ -109,9 +109,15 @@ class GatewayTestCase(TestCase):
             'depth': 'adapted', 'adapter': 'topic_toolkit', 'operations': ['extract'], **fields,
         })
 
+    def make_reader_stub_tool(self, **fields) -> Tool:
+        return self.make_stub_tool(operations=['echo', 'query'], read_operations=['query'], **fields)
+
     # Async tests can't use the sync ORM directly.
     async def amake_stub_tool(self, **fields) -> Tool:
         return await sync_to_async(self.make_stub_tool)(**fields)
+
+    async def amake_reader_stub_tool(self, **fields) -> Tool:
+        return await sync_to_async(self.make_reader_stub_tool)(**fields)
 
     async def amake_toolkit_tool(self, **fields) -> Tool:
         return await sync_to_async(self.make_toolkit_tool)(**fields)
@@ -127,5 +133,17 @@ class GatewayTestCase(TestCase):
             response = await self.async_client.post(f'/api/v1/tools/{tool_id}/{operation}', data,
                                                     content_type=content_type, headers=request_headers)
         # Django logs one django.request line per 4xx/5xx: assert it, and keep it out of the suite output.
+        self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
+        return response
+
+    async def read(self, tool_id, operation, params=None, *, key=_OWN_KEY, headers=None):
+        """A GET on the unified route. A list value in `params` repeats the parameter."""
+        request_headers = dict(headers or {})
+        key = self.key if key is _OWN_KEY else key
+        if key is not None:
+            request_headers['X-Gateway-Key'] = key
+        with capture_logs('django.request') as records:
+            response = await self.async_client.get(f'/api/v1/tools/{tool_id}/{operation}', params or {},
+                                                   headers=request_headers)
         self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
         return response

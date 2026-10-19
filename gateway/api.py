@@ -1,12 +1,13 @@
 """The gateway's HTTP API, mounted at /api/v1/ (spec §4.2)."""
 from asgiref.sync import sync_to_async
 from django.db import DatabaseError, connection
+from django.http import HttpResponse
 from ninja import NinjaAPI, Path
 from ninja.responses import codes_4xx, codes_5xx
 
 from gateway.auth import GatewayKeyAuth
 from gateway.errors import TOOL_NOT_FOUND, GatewayError, install_error_handlers
-from gateway.invoke import invoke
+from gateway.invoke import invoke, invoke_read
 from gateway.models import SLUG_PATTERN, Tool
 from gateway.schemas import CatalogueEntry, Envelope, ErrorResponse, Health, UnifiedResponse
 
@@ -57,6 +58,24 @@ async def call_tool(
     Ninja runs auth first, then envelope validation, then this view.
     """
     return await invoke(request, tool_id, operation, envelope)
+
+
+# Same url_name as the POST: the middleware's unified-route check matches both methods by name.
+@api.get('/tools/{tool_id}/{operation}', url_name='call_tool', response={200: UnifiedResponse, **ERRORS},
+         tags=['tools'])
+async def call_tool_read(
+    request,
+    response: HttpResponse,
+    tool_id: str = Path(..., pattern=SLUG_PATTERN, max_length=64),
+    operation: str = Path(..., pattern=SLUG_PATTERN, max_length=64),
+):
+    """Call one read operation of a registered tool (see `read_operations` in the catalogue).
+
+    The query string is the input, one value per parameter (a repeated parameter is a 422). Send
+    `If-None-Match` and it goes to the tool; the tool's `ETag` comes back unchanged, and a `304` has no
+    body. Answers are `Cache-Control: no-store`: cache them in your application, not in an HTTP cache.
+    """
+    return await invoke_read(request, tool_id, operation, response)
 
 
 def _catalogue_entry(tool: Tool) -> dict:
