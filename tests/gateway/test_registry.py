@@ -1,8 +1,11 @@
 from cryptography.fernet import Fernet, InvalidToken
 from django.core.exceptions import ValidationError
+from unittest import mock
+
+from django.db import DatabaseError
 from django.test import SimpleTestCase, TestCase, override_settings
 
-from gateway.checks import encryption_keys_check
+from gateway.checks import encryption_keys_check, unknown_adapter_check
 from gateway.crypto import decrypt, encrypt
 from gateway.logging_filters import redact_text
 from gateway.models import Tool
@@ -167,3 +170,19 @@ class EncryptionKeysCheckTests(SimpleTestCase):
                     errors = encryption_keys_check(None)
                 self.assertEqual([e.id for e in errors], ['gateway.E001'])
                 self.assertNotIn(NEW_KEY, errors[0].msg + (errors[0].hint or ''))
+
+
+class UnknownAdapterCheckTests(TestCase):
+    def test_flags_rows_whose_adapter_is_gone(self):
+        Tool.objects.create(**toolkit_fields())
+        self.assertEqual(unknown_adapter_check(None, databases=['default']), [])
+        Tool.objects.update(adapter='removed-adapter')
+        warnings = unknown_adapter_check(None, databases=['default'])
+        self.assertEqual([w.id for w in warnings], ['gateway.W001'])
+        self.assertIn('topic-toolkit', warnings[0].msg)
+
+    def test_skipped_without_a_database_or_before_migrate(self):
+        self.assertEqual(unknown_adapter_check(None), [])
+        with mock.patch('gateway.models.Tool.objects') as objects:
+            objects.exclude.side_effect = DatabaseError('no such table: gateway_tool')
+            self.assertEqual(unknown_adapter_check(None, databases=['default']), [])

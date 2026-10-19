@@ -152,7 +152,10 @@ class Tool(models.Model):
         """The operations called with GET, in `operations` order."""
         from gateway.adapters import ADAPTERS
 
-        declared = ADAPTERS[self.adapter].read_operations
+        adapter = ADAPTERS.get(self.adapter)
+        if adapter is None:  # a row saved before its adapter left the code: keep the catalogue up
+            return []
+        declared = adapter.read_operations
         reads = set(self.read_operations) if declared is None else declared
         return [op for op in self.operations if op in reads]
 

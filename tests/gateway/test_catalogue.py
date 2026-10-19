@@ -42,6 +42,13 @@ class CatalogueTests(GatewayTestCase):
         entry = (await self.get('/api/v1/tools/stub')).json()
         self.assertEqual((entry['operations'], entry['read_operations']), (['echo', 'query'], ['query']))
 
+    async def test_a_row_with_a_removed_adapter_does_not_break_the_catalogue(self):
+        # Only possible for a row saved before its adapter left the code (clean() refuses it otherwise).
+        await sync_to_async(Tool.objects.filter(tool_id='topic-toolkit').update)(adapter='removed-adapter')
+        response = await self.get('/api/v1/tools')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()[2]['read_operations'], [])
+
     async def test_reachability(self):
         entries = (await self.get('/api/v1/tools')).json()
         self.assertEqual({e['tool_id']: e['reachability'] for e in entries},
