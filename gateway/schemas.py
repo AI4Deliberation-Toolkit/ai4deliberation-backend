@@ -44,5 +44,6 @@ class CatalogueEntry(Schema):
     description: str
     docs_url: str
     operations: list[str]
+    read_operations: list[str]
     depth: str  # native | adapted
     reachability: str  # open | direct | gateway_only

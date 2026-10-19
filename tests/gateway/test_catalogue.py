@@ -1,3 +1,6 @@
+from asgiref.sync import sync_to_async
+
+from gateway.models import Tool
 from tests.gateway.support import GatewayTestCase, assert_gateway_error, capture_logs
 
 
@@ -29,9 +32,15 @@ class CatalogueTests(GatewayTestCase):
         self.assertEqual([e['tool_id'] for e in entries], ['direct-tool', 'stub', 'topic-toolkit'])
         self.assertEqual(entries[2], {
             'tool_id': 'topic-toolkit', 'name': 'Topic toolkit', 'description': 'Topic extraction',
-            'docs_url': 'https://docs.example.org/toolkit', 'operations': ['extract'], 'depth': 'adapted',
-            'reachability': 'open',
+            'docs_url': 'https://docs.example.org/toolkit', 'operations': ['extract'], 'read_operations': [],
+            'depth': 'adapted', 'reachability': 'open',
         })
+
+    async def test_native_read_operations_are_listed(self):
+        await sync_to_async(Tool.objects.filter(tool_id='stub').update)(operations=['echo', 'query'],
+                                                                         read_operations=['query'])
+        entry = (await self.get('/api/v1/tools/stub')).json()
+        self.assertEqual((entry['operations'], entry['read_operations']), (['echo', 'query'], ['query']))
 
     async def test_reachability(self):
         entries = (await self.get('/api/v1/tools')).json()

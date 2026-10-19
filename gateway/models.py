@@ -71,6 +71,11 @@ class Tool(models.Model):
     # Validated against gateway.adapters.ADAPTERS in clean(), not `choices`: a new adapter needs no migration.
     adapter = models.CharField(max_length=64)
     operations = models.JSONField(default=list, help_text='JSON list of operation slugs, e.g. ["extract"].')
+    read_operations = models.JSONField(
+        default=list, blank=True,
+        help_text='Native tools only: JSON list of the operations that are read calls (GET), e.g. ["query"]. '
+                  'Adapted tools: leave empty; the adapter declares them.',
+    )
     tool_key = models.TextField(blank=True, default='', editable=False)  # MultiFernet token, never plaintext
     key_header = models.CharField(max_length=100, default='X-API-Key')
     gateway_only = models.BooleanField(default=False)
@@ -96,6 +101,8 @@ class Tool(models.Model):
     def clean(self):
         from gateway.adapters import ADAPTERS  # adapters import Ninja; keep that out of model loading
 
+        if self.read_operations is None:  # a cleared admin field; blank=True lets it past clean_fields
+            self.read_operations = []
         errors = {}
         adapter = ADAPTERS.get(self.adapter)
         if adapter is None:
@@ -106,6 +113,7 @@ class Tool(models.Model):
             errors.setdefault('adapter', 'Native tools use the "native" adapter, and only native tools do.')
         for field, error in (
             ('operations', self._operations_error(adapter)),
+            ('read_operations', self._read_operations_error(adapter)),
             ('base_url', self._base_url_error()),
             ('health_path', self._health_path_error()),
             ('key_header', self._key_header_error()),
@@ -127,6 +135,26 @@ class Tool(models.Model):
             if unsupported:
                 return f'Not supported by the {self.adapter} adapter: {", ".join(unsupported)}.'
         return None
+
+    def _read_operations_error(self, adapter):
+        reads = self.read_operations
+        if not isinstance(reads, list) or not all(isinstance(op, str) and _SLUG_RE.fullmatch(op) for op in reads):
+            return 'A JSON list of operation slugs.'
+        if len(set(reads)) != len(reads):
+            return 'Read operations must not repeat.'
+        if not set(reads) <= set(self.operations if isinstance(self.operations, list) else []):
+            return 'Each read operation must also be in operations.'
+        if reads and adapter is not None and adapter.read_operations is not None:
+            return 'Adapted tools: the adapter declares its read operations; leave this empty.'
+        return None
+
+    def read_operation_names(self) -> list[str]:
+        """The operations called with GET, in `operations` order."""
+        from gateway.adapters import ADAPTERS
+
+        declared = ADAPTERS[self.adapter].read_operations
+        reads = set(self.read_operations) if declared is None else declared
+        return [op for op in self.operations if op in reads]
 
     def _base_url_error(self):
         try:

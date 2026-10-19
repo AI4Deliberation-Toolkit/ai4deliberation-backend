@@ -20,6 +20,9 @@ def toolkit_fields(**overrides):
     return fields
 
 
+STUB = dict(tool_id='stub', name='Stub', base_url='http://127.0.0.1:8000/stub', depth='native', adapter='native')
+
+
 class ToolValidationTests(TestCase):
     def assertRefused(self, field, **overrides):
         with self.assertRaises(ValidationError) as caught:
@@ -79,6 +82,24 @@ class ToolValidationTests(TestCase):
         for bad in (0, 291):
             with self.subTest(timeout_seconds=bad):
                 self.assertRefused('timeout_seconds', timeout_seconds=bad)
+
+    def test_native_read_operations_are_a_subset_of_operations(self):
+        tool = Tool.objects.create(**STUB, operations=['echo', 'query'], read_operations=['query'])
+        self.assertEqual(tool.read_operation_names(), ['query'])
+        Tool.objects.all().delete()
+        for bad in (['other'], 'query', ['query', 'query'], [1]):
+            with self.subTest(read_operations=bad):
+                with self.assertRaises(ValidationError) as caught:
+                    Tool.objects.create(**STUB, operations=['echo', 'query'], read_operations=bad)
+                self.assertIn('read_operations', caught.exception.message_dict)
+
+    def test_adapted_tools_leave_read_operations_empty(self):
+        self.assertRefused('read_operations', read_operations=['extract'])
+
+    def test_read_operation_names_keep_the_operations_order(self):
+        tool = Tool(**STUB, operations=['b', 'echo', 'a'], read_operations=['a', 'b'])
+        self.assertEqual(tool.read_operation_names(), ['b', 'a'])
+        self.assertEqual(Tool(**toolkit_fields()).read_operation_names(), [])
 
     def test_saving_registers_the_key_header_for_redaction(self):
         # A header name no other test registers (the registry is process-wide).

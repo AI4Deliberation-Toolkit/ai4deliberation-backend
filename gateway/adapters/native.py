@@ -5,6 +5,7 @@ from gateway.errors import TOOL_BAD_RESPONSE, GatewayError
 
 class NativeAdapter(Adapter):
     operations = None
+    read_operations = None
 
     def build_request(self, tool, operation, envelope):
         return Outbound(method='POST', path=f'/{operation}', json=envelope.model_dump())

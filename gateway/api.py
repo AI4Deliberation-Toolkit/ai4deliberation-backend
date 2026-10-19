@@ -63,7 +63,8 @@ def _catalogue_entry(tool: Tool) -> dict:
     # Never base_url, key_header or any key.
     return {
         'tool_id': tool.tool_id, 'name': tool.name, 'description': tool.description, 'docs_url': tool.docs_url,
-        'operations': list(tool.operations), 'depth': tool.depth, 'reachability': tool.reachability,
+        'operations': list(tool.operations), 'read_operations': tool.read_operation_names(), 'depth': tool.depth,
+        'reachability': tool.reachability,
     }
 
 

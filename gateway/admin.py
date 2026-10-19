@@ -69,7 +69,7 @@ class ToolAdminForm(forms.ModelForm):
         model = Tool
         fields = (
             'tool_id', 'name', 'description', 'docs_url', 'base_url', 'depth', 'adapter', 'operations',
-            'key_header', 'gateway_only', 'timeout_seconds', 'health_path', 'enabled',
+            'read_operations', 'key_header', 'gateway_only', 'timeout_seconds', 'health_path', 'enabled',
         )
 
     def __init__(self, *args, **kwargs):

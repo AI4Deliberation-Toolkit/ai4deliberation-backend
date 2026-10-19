@@ -36,6 +36,8 @@ class ToolError(Exception):
 
 class Adapter:
     operations: set[str] | None = None  # None means any operation
+    # The operations called with GET. None: each registry entry declares its own (Tool.read_operations).
+    read_operations: frozenset[str] | None = frozenset()
 
     def build_request(self, tool, operation: str, envelope) -> Outbound:
         """May raise GatewayError(INVALID_REQUEST)."""

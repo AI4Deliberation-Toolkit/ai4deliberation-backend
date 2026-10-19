@@ -9,6 +9,7 @@ EXTRACT_OPTIONS = ('include_labels', 'include_raw')
 
 class TopicToolkitAdapter(Adapter):
     operations = {'extract'}
+    read_operations = frozenset()
 
     def build_request(self, tool, operation, envelope):
         unknown = sorted(set(envelope.options) - set(EXTRACT_OPTIONS))

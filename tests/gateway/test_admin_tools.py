@@ -76,6 +76,16 @@ class ToolAdminTests(TestCase):
     def test_https_does_not_warn(self):
         self.assertNotContains(self.add(), 'travels unencrypted')
 
+    def test_cleared_read_operations_field_saves_an_empty_list(self):
+        self.add(read_operations='')  # a cleared textarea arrives as None; unhandled, it is an IntegrityError (500)
+        self.assertEqual(Tool.objects.get().read_operations, [])
+
+    def test_read_operations_field_is_editable(self):
+        self.add(tool_id='stub', name='Stub', base_url='http://127.0.0.1:8000/stub', depth='native', adapter='native',
+                 operations='["echo", "query"]', read_operations='["query"]', health_path='')
+        self.assertEqual(Tool.objects.get().read_operations, ['query'])
+        self.assertContains(self.client.get('/admin/gateway/tool/add/'), 'name="read_operations"')
+
     def test_model_validation_shows_on_the_form(self):
         response = self.add(depth='passthrough')
         self.assertContains(response, 'Pass-through is reserved')
