@@ -6,7 +6,10 @@ Written by hand from the toolkit's source at commit `5bcee4b`
 The `extract_*` fixtures were checked against the Runpod toolkit on 2026-10-12 with the live check
 below: it passed. That check covers only `extract_request.json` and the top-level keys and types of
 `extract_201.json`; the items inside `normalized` and the other `extract_*` fixtures were not checked.
-The read-endpoint fixtures (`taxonomy_*`, `article_topics_*`, `similar_articles_*`) are not checked yet.
+Checked again on 2026-10-19, read endpoints included: all 4 live checks passed. They cover the
+top-level keys and types of `extract_201.json`, `taxonomy_200.json`, `article_topics_200.json` and
+`similar_articles_200.json`, and a taxonomy `304` round trip with a strong ETag through the Runpod
+proxy when asked for an uncompressed answer. The error fixtures were not checked.
 
 - `extract_request.json`: a request body for `POST /api/topics/extract-conversation`
 - `extract_201.json`: the success body (`include_labels` and `include_raw` off)
