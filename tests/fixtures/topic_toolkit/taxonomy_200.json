@@ -1,0 +1,18 @@
+{
+  "version": "2026-05-21-1",
+  "language": "el",
+  "parents": {
+    "economy": "Οικονομία",
+    "society": "Κοινωνία"
+  },
+  "leaves": {
+    "public_finance": "Δημόσια οικονομικά",
+    "labour_and_employment": "Εργασία και απασχόληση",
+    "education": "Εκπαίδευση"
+  },
+  "hierarchy": {
+    "public_finance": "economy",
+    "labour_and_employment": "economy",
+    "education": "society"
+  }
+}

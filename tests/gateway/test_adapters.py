@@ -78,7 +78,7 @@ class TopicToolkitAdapterTests(SimpleTestCase):
         return Envelope(input=load_fixture('extract_request.json'), options=options)
 
     def test_operations(self):
-        self.assertEqual(self.adapter.operations, {'extract'})
+        self.assertEqual(self.adapter.operations, {'extract', 'taxonomy', 'article-topics', 'similar-articles'})
 
     def test_build_sends_input_as_is(self):
         outbound = self.adapter.build_request(TOOL, 'extract', self.envelope())
@@ -139,6 +139,88 @@ class TopicToolkitAdapterTests(SimpleTestCase):
             with self.subTest(status=status):
                 with self.assertRaises(ToolError) as caught:
                     self.adapter.parse_response(TOOL, 'extract', status, load_fixture(name))
+                self.assertEqual((caught.exception.status, caught.exception.body), (status, load_fixture(name)))
+
+
+class TopicToolkitReadTests(SimpleTestCase):
+    adapter = TopicToolkitAdapter()
+
+    def build(self, operation, params):
+        return self.adapter.build_read_request(TOOL, operation, params)
+
+    def test_reads(self):
+        self.assertEqual(self.adapter.read_operations, {'taxonomy', 'article-topics', 'similar-articles'})
+
+    def test_taxonomy(self):
+        self.assertEqual(self.build('taxonomy', {'language': 'el'}),
+                         Outbound(method='GET', path='/api/topics', params={'language': 'el'}, json=None))
+        self.assertEqual(self.build('taxonomy', {}).params, {})
+
+    def test_empty_optional_value_is_forwarded(self):
+        self.assertEqual(self.build('taxonomy', {'language': ''}).params, {'language': ''})
+
+    def test_article_topics(self):
+        outbound = self.build('article-topics', {'article_id': '42', 'include_labels': 'true', 'include_raw': 'false'})
+        self.assertEqual((outbound.path, outbound.params), ('/api/topics/article/42', {'include_labels': 'true'}))
+
+    def test_similar_articles(self):
+        outbound = self.build('similar-articles', {'platform': 'wordpress-opengov', 'article_id': '42', 'k': '5',
+                                                   'topic_slug': 'public_finance'})
+        self.assertEqual((outbound.path, outbound.params),
+                         ('/api/articles/wordpress-opengov/42/similar', {'k': '5', 'topic_slug': 'public_finance'}))
+
+    def test_path_values_are_one_encoded_segment(self):  # spec §5.6; Review Focus 5
+        cases = {'../x': '..%2Fx', 'a/b': 'a%2Fb', 'a?b#c': 'a%3Fb%23c', '%2F': '%252F',
+                 'άρθρο': '%CE%AC%CF%81%CE%B8%CF%81%CE%BF', '...': '...'}
+        for value, encoded in cases.items():
+            with self.subTest(value=value):
+                self.assertEqual(self.build('article-topics', {'article_id': value}).path,
+                                 f'/api/topics/article/{encoded}')
+        self.assertEqual(self.build('similar-articles', {'platform': 'a/b', 'article_id': '1'}).path,
+                         '/api/articles/a%2Fb/1/similar')
+
+    def test_dot_segments_and_empty_path_values_are_refused(self):
+        for op, params, name in (('article-topics', {'article_id': ''}, 'article_id'),
+                                 ('article-topics', {'article_id': '.'}, 'article_id'),
+                                 ('article-topics', {'article_id': '..'}, 'article_id'),
+                                 ('similar-articles', {'platform': '..', 'article_id': '1'}, 'platform')):
+            with self.subTest(op=op, params=params):
+                with self.assertRaises(GatewayError) as caught:
+                    self.build(op, params)
+                self.assertEqual(caught.exception.code, 'INVALID_REQUEST')
+                self.assertIn(name, caught.exception.message)
+
+    def test_unknown_parameter_names_the_allowed_ones(self):
+        with self.assertRaises(GatewayError) as caught:
+            self.build('taxonomy', {'lang': 'el'})
+        self.assertIn('lang', caught.exception.message)
+        self.assertIn('language', caught.exception.message)
+
+    def test_missing_path_parameter(self):
+        with self.assertRaises(GatewayError) as caught:
+            self.build('similar-articles', {'article_id': '1'})
+        self.assertIn('platform', caught.exception.message)
+
+    def test_flags_are_true_or_false(self):
+        with self.assertRaises(GatewayError) as caught:
+            self.build('article-topics', {'article_id': '1', 'include_raw': 'yes'})
+        self.assertIn('include_raw', caught.exception.message)
+
+    def test_parse_reads(self):
+        for op, name, metadata in (('taxonomy', 'taxonomy_200.json', {'taxonomy_version': '2026-05-21-1'}),
+                                   ('article-topics', 'article_topics_200.json', {'taxonomy_version': '2026-05-21-1'}),
+                                   ('similar-articles', 'similar_articles_200.json', {})):
+            with self.subTest(op=op):
+                result = self.adapter.parse_response(TOOL, op, 200, load_fixture(name))
+                self.assertEqual((result.output, result.metadata), (load_fixture(name), metadata))
+
+    def test_read_errors_raise_tool_error_with_the_body(self):
+        for op, status, name in (('taxonomy', 400, 'taxonomy_400.json'),
+                                 ('article-topics', 404, 'article_topics_404.json'),
+                                 ('similar-articles', 400, 'similar_articles_400.json')):
+            with self.subTest(op=op):
+                with self.assertRaises(ToolError) as caught:
+                    self.adapter.parse_response(TOOL, op, status, load_fixture(name))
                 self.assertEqual((caught.exception.status, caught.exception.body), (status, load_fixture(name)))
 
 

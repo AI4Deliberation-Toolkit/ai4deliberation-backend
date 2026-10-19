@@ -2,9 +2,10 @@ import httpx
 from asgiref.sync import sync_to_async
 
 from gateway.models import Tool
-from tests.gateway.support import GatewayTestCase, assert_gateway_error, capture_logs, reply_json
+from tests.gateway.support import GatewayTestCase, assert_gateway_error, capture_logs, load_fixture, reply_json
 
 ETAG = '"v1-el"'
+TOOLKIT_ETAG = '"2026-05-21-1-el"'
 
 
 class ReadRouteTests(GatewayTestCase):
@@ -130,3 +131,44 @@ class ReadRouteTests(GatewayTestCase):
         await sync_to_async(Tool.objects.filter(tool_id='stub').update)(timeout_seconds=7)
         await self.read('stub', 'query')
         self.assertEqual(self.tool_requests[0].extensions['timeout']['read'], 7)
+
+
+class ToolkitReadTests(GatewayTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_toolkit_tool(operations=['extract', 'taxonomy', 'article-topics', 'similar-articles'])
+
+    def taxonomy_reply(self, request):
+        if request.headers.get('If-None-Match') == TOOLKIT_ETAG:
+            return httpx.Response(304, headers={'ETag': TOOLKIT_ETAG})
+        return httpx.Response(200, json=load_fixture('taxonomy_200.json'),
+                              headers={'ETag': TOOLKIT_ETAG, 'Cache-Control': 'public, max-age=300'})
+
+    async def test_taxonomy_round_trip(self):
+        self.tool_reply = self.taxonomy_reply
+        first = await self.read('topic-toolkit', 'taxonomy', {'language': 'el'})
+        self.assertEqual((first.status_code, first['ETag'], first['Cache-Control']), (200, TOOLKIT_ETAG, 'no-store'))
+        self.assertEqual(first.json()['output'], load_fixture('taxonomy_200.json'))
+        self.assertEqual(first.json()['metadata']['taxonomy_version'], '2026-05-21-1')
+        self.assertEqual(str(self.tool_requests[0].url), 'https://toolkit.example.org/api/topics?language=el')
+        second = await self.read('topic-toolkit', 'taxonomy', {'language': 'el'},
+                                 headers={'If-None-Match': first['ETag']})
+        self.assertEqual((second.status_code, second.content, second['ETag']), (304, b'', TOOLKIT_ETAG))
+
+    async def test_article_topics_404_is_mirrored(self):
+        self.tool_reply = reply_json(404, load_fixture('article_topics_404.json'))
+        response = await self.read('topic-toolkit', 'article-topics', {'article_id': 'missing'})
+        error = assert_gateway_error(self, response, 404, 'TOOL_ERROR', source='tool')
+        self.assertEqual(error['tool_body'], load_fixture('article_topics_404.json'))
+
+    async def test_path_values_never_change_the_tool_path(self):
+        self.tool_reply = reply_json(200, load_fixture('article_topics_200.json'))
+        await self.read('topic-toolkit', 'article-topics', {'article_id': '../../extract-conversation'})
+        self.assertEqual(self.tool_requests[0].url.raw_path, b'/api/topics/article/..%2F..%2Fextract-conversation')
+        response = await self.read('topic-toolkit', 'article-topics', {'article_id': '..'})
+        assert_gateway_error(self, response, 422, 'INVALID_REQUEST')
+        self.assertEqual(len(self.tool_requests), 1)
+
+    async def test_extract_is_still_a_write(self):
+        response = await self.read('topic-toolkit', 'extract')
+        self.assertEqual((response.status_code, response['Allow']), (405, 'POST'))
