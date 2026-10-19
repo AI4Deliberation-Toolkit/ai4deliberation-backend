@@ -5,10 +5,10 @@ from typing import Any
 
 @dataclass
 class Outbound:
-    method: str  # "POST" in v0
+    method: str  # "POST" or "GET"
     path: str  # appended to tool.base_url; starts with "/"
     params: dict[str, str] = field(default_factory=dict)  # query string
-    json: dict = field(default_factory=dict)
+    json: dict | None = None  # None: no body (always for GET)
 
 
 @dataclass
@@ -41,6 +41,13 @@ class Adapter:
 
     def build_request(self, tool, operation: str, envelope) -> Outbound:
         """May raise GatewayError(INVALID_REQUEST)."""
+        raise NotImplementedError
+
+    def build_read_request(self, tool, operation: str, params: dict[str, str]) -> Outbound:
+        """A read call. `params` is the caller's query string, one value per name.
+
+        May raise GatewayError(INVALID_REQUEST).
+        """
         raise NotImplementedError
 
     def parse_response(self, tool, operation: str, status: int, body: Any) -> Result:

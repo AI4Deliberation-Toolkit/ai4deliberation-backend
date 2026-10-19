@@ -12,6 +12,7 @@ UNAUTHORIZED = 'UNAUTHORIZED'
 TOOL_NOT_FOUND = 'TOOL_NOT_FOUND'
 OPERATION_NOT_FOUND = 'OPERATION_NOT_FOUND'
 INVALID_REQUEST = 'INVALID_REQUEST'
+METHOD_NOT_ALLOWED = 'METHOD_NOT_ALLOWED'
 REQUEST_TOO_LARGE = 'REQUEST_TOO_LARGE'
 TOOL_TIMEOUT = 'TOOL_TIMEOUT'
 TOOL_UNREACHABLE = 'TOOL_UNREACHABLE'
@@ -30,6 +31,7 @@ STATUS = {
     TOOL_NOT_FOUND: 404,
     OPERATION_NOT_FOUND: 404,
     INVALID_REQUEST: 422,
+    METHOD_NOT_ALLOWED: 405,
     REQUEST_TOO_LARGE: 413,
     TOOL_TIMEOUT: 504,
     TOOL_UNREACHABLE: 502,
@@ -43,6 +45,7 @@ MESSAGES = {
     TOOL_NOT_FOUND: 'Unknown tool.',
     OPERATION_NOT_FOUND: 'Unknown operation for this tool.',
     INVALID_REQUEST: 'Invalid request.',
+    METHOD_NOT_ALLOWED: 'This operation does not accept this HTTP method.',
     REQUEST_TOO_LARGE: 'Request body is too large.',
     TOOL_TIMEOUT: 'The tool did not answer in time.',
     TOOL_UNREACHABLE: 'The tool could not be reached.',
@@ -55,11 +58,13 @@ MESSAGES = {
 class GatewayError(Exception):
     """An error the gateway itself reports (`source: gateway`)."""
 
-    def __init__(self, code: str, message: str | None = None, *, tool_id: str | None = None):
+    def __init__(self, code: str, message: str | None = None, *, tool_id: str | None = None,
+                 headers: dict[str, str] | None = None):
         self.code = code
         self.status = STATUS[code]
         self.message = message or MESSAGES[code]
         self.tool_id = tool_id
+        self.headers = dict(headers or {})  # set on the error response, e.g. Allow for a 405
         super().__init__(self.message)
 
 
@@ -85,7 +90,10 @@ def error_response(request, code, message, status, *, source='gateway', tool_id=
 
 
 def _on_gateway_error(request, exc: GatewayError):
-    return error_response(request, exc.code, exc.message, exc.status, tool_id=exc.tool_id)
+    response = error_response(request, exc.code, exc.message, exc.status, tool_id=exc.tool_id)
+    for name, value in exc.headers.items():
+        response[name] = value
+    return response
 
 
 def _on_tool_error(request, exc):

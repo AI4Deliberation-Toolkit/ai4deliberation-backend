@@ -25,6 +25,13 @@ class NativeAdapterTests(SimpleTestCase):
     def test_accepts_any_operation(self):
         self.assertIsNone(self.adapter.operations)
 
+    def test_reads_are_declared_per_tool(self):
+        self.assertIsNone(self.adapter.read_operations)
+
+    def test_build_read_gets_the_operation_with_the_query(self):
+        self.assertEqual(self.adapter.build_read_request(TOOL, 'query', {'a': '1', 'b': 'two words'}),
+                         Outbound(method='GET', path='/query', params={'a': '1', 'b': 'two words'}, json=None))
+
     def test_build_posts_the_whole_envelope_to_the_operation(self):
         envelope = Envelope(input={'echo': 'hi'}, options={'x': 1}, session_id='s-1')
         self.assertEqual(
@@ -77,6 +84,7 @@ class TopicToolkitAdapterTests(SimpleTestCase):
         outbound = self.adapter.build_request(TOOL, 'extract', self.envelope())
         self.assertEqual(outbound, Outbound(method='POST', path='/api/topics/extract-conversation', params={},
                                             json=load_fixture('extract_request.json')))
+        self.assertEqual(TopicToolkitAdapter().build_request(TOOL, 'extract', self.envelope()).method, 'POST')
 
     def test_options_become_query_parameters(self):
         outbound = self.adapter.build_request(TOOL, 'extract', self.envelope(include_labels=True, include_raw=True))
