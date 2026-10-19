@@ -270,6 +270,25 @@ was lost. Archiving to the network volume works: a manual `pg_switch_wal()` was 
 `kill 1` restarts the container with its disk (§5). The SSH session has the pod's environment
 (`RUNPOD_POD_ID` is set).
 
+Read calls rollout (image `20216ff`, 2026-10-19): Edit Pod from `9642d03` (§3), `restore complete:
+timeline 6 in 5 s`; the one `.history` archive failure from item 4 above, archived afterwards.
+Registry edits in the admin: `topic-toolkit` operations `["extract", "taxonomy", "article-topics",
+"similar-articles"]` (read operations stay empty: the adapter declares them), `stub` operations
+`["echo", "query"]` with read operations `["query"]`. The `topic-toolkit` timeout stays at 60 s: the
+only `extract` in the call log took 1 s, too little evidence; it is set together with the plugin's
+gateway-mode timeout. Smoke test with a throwaway `KT test` key (revoked afterwards), plain curl
+without `--compressed`: `taxonomy` 200 with the toolkit's strong ETag `"2026-05-21-1-el"` (the same
+as calling the toolkit directly) and `Cache-Control: no-store`, then 304 with `If-None-Match`;
+`article-topics` 200 with `taxonomy_version`; `similar-articles` 200; `GET …/extract` 405 with
+`Allow: POST`; stub `query` 200 with `ETag: "stub-1"`, then 304. Call log: one row per call, 304
+rows with no error. Seen once, not reproduced in two retries: a stub 304 whose row said 200, during
+a two-minute toolkit outage (the toolkit pod's machine was flagged by Runpod that evening; the
+gateway mirrored the outage as `404 TOOL_ERROR` with an empty `tool_body`).
+
+Caching: Cloudflare caches the toolkit's topic list at its edge for 300 s (the toolkit sends
+`public, max-age=300`), so a taxonomy change can take up to 5 minutes to show, through the gateway as
+in direct mode. The gateway's own answers are `no-store`.
+
 Locally, `docker/pod/drill.sh` runs the full drill against a Docker volume (spec §9.2).
 
 ## 8. Reference
