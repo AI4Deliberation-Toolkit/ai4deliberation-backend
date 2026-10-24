@@ -1,6 +1,6 @@
 """The KG chatbot's RAG, as of KG repo commit a309fe5 (spec 2026-10-23-kg-rag-adapter-design.md)."""
-from gateway.adapters.base import Adapter, Outbound
-from gateway.errors import INVALID_REQUEST, GatewayError
+from gateway.adapters.base import Adapter, Outbound, Result, ToolError
+from gateway.errors import INVALID_REQUEST, TOOL_BAD_RESPONSE, GatewayError
 
 ASK_PATH = '/ask'
 INPUT_FIELDS = ('question', 'history')
@@ -9,6 +9,8 @@ MAX_QUESTION_CHARS = 4000
 MAX_HISTORY_PAIRS = 20
 MAX_HISTORY_ITEM_CHARS = 8000
 NOT_ANSWERED = 'The tool could not answer the question.'
+# The only keys of the RAG's answer that reach the caller.
+OUTPUT_FIELDS = ('answer', 'sparql_generated', 'raw_data_count')
 
 
 def refuse(message: str) -> GatewayError:
@@ -58,3 +60,17 @@ class KgRagAdapter(Adapter):
                 check_text(f'input.history[{i}][{j}]', item, MAX_HISTORY_ITEM_CHARS)
         return Outbound(method='POST', path=ASK_PATH,
                         json={'question': question, 'history': [list(pair) for pair in history]})
+
+    def parse_response(self, tool, operation, status, body):
+        if not 200 <= status < 300:
+            raise ToolError(status, body)
+        if not isinstance(body, dict):
+            raise GatewayError(TOOL_BAD_RESPONSE, 'The RAG did not answer with a JSON object.')
+        success = body.get('success')
+        if success is False:  # identity checks: 0 and 1 are not booleans
+            raise ToolError(status, body, message=NOT_ANSWERED)
+        if success is not True:
+            raise GatewayError(TOOL_BAD_RESPONSE, 'The RAG answer has no success flag of true or false.')
+        if not isinstance(body.get('answer'), str):
+            raise GatewayError(TOOL_BAD_RESPONSE, 'The RAG answer has no answer text.')
+        return Result(output={k: body[k] for k in OUTPUT_FIELDS if k in body}, metadata={})

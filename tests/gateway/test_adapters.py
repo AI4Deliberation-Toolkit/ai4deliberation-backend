@@ -3,7 +3,7 @@ from pydantic import ValidationError
 
 from gateway.adapters import ADAPTERS
 from gateway.adapters.base import Outbound, Result, ToolError
-from gateway.adapters.kg_rag import KgRagAdapter
+from gateway.adapters.kg_rag import NOT_ANSWERED, KgRagAdapter
 from gateway.adapters.native import NativeAdapter
 from gateway.adapters.topic_toolkit import TopicToolkitAdapter
 from gateway.errors import GatewayError
@@ -316,3 +316,52 @@ class KgRagAdapterTests(SimpleTestCase):
         self.assert_refused({'wp_user_id': SECRET}, NO_OPTIONS, stream=True)
         self.assert_refused({'wp_user_id': SECRET, 'history': None}, UNKNOWN_WP)
         self.assert_refused({'question': '', 'history': None}, 'input.question must not be empty.')
+
+
+    def parse(self, body, status=200):
+        return self.adapter.parse_response(TOOL, 'ask', status, body)
+
+    def assert_bad_response(self, body):
+        with self.assertRaises(GatewayError) as caught:
+            self.parse(body)
+        self.assertEqual(caught.exception.code, 'TOOL_BAD_RESPONSE')
+
+    def test_success_output_is_a_fixed_shape(self):
+        body = {**load_fixture('ask_200.json', 'kg_rag'), 'confidence': 0.9}
+        self.assertEqual(self.parse(body), Result(output={k: body[k] for k in ('answer', 'sparql_generated', 'raw_data_count')},
+                                                  metadata={}))
+
+    def test_optional_fields_are_left_out_when_absent(self):  # Review Focus 4: empty answer is still an answer
+        self.assertEqual(self.parse({'answer': '', 'success': True}).output, {'answer': ''})
+
+    def test_success_false_is_a_tool_error_carrying_the_body(self):
+        body = load_fixture('ask_200_not_answered.json', 'kg_rag')
+        with self.assertRaises(ToolError) as caught:
+            self.parse(body)
+        self.assertEqual((caught.exception.status, caught.exception.body, caught.exception.message),
+                         (200, body, NOT_ANSWERED))
+
+    def test_success_must_be_exactly_true_or_false(self):
+        for body in ({'answer': 'a'}, *({'answer': 'a', 'success': s} for s in (0, 1, None, 'true', 'false', []))):
+            with self.subTest(body=body):
+                self.assert_bad_response(body)
+
+    def test_answer_must_be_a_string(self):
+        for body in ({'success': True}, *({'success': True, 'answer': a} for a in (None, 3, ['a'], {}))):
+            with self.subTest(body=body):
+                self.assert_bad_response(body)
+
+    def test_body_must_be_an_object(self):
+        for body in (None, [], 'text', 3):
+            with self.subTest(body=body):
+                self.assert_bad_response(body)
+
+    def test_error_status_is_a_tool_error_with_the_body(self):
+        for status, body in ((422, {'detail': [{'loc': ['body', 'question'], 'msg': 'field required'}]}),
+                             (500, load_fixture('ask_500.json', 'kg_rag')), (302, None)):
+            with self.subTest(status=status):
+                with self.assertRaises(ToolError) as caught:
+                    self.parse(body, status)
+                self.assertEqual((caught.exception.status, caught.exception.body), (status, body))
+                self.assertEqual(caught.exception.message, 'The tool returned an error.')
+                self.assertNotEqual(caught.exception.message, NOT_ANSWERED)

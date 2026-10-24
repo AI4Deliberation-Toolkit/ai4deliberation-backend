@@ -1,0 +1,1 @@
+{"answer": "Ο γράφος περιέχει τρεις διαβουλεύσεις.", "sparql_generated": "PREFIX og: <http://example.org/og#> SELECT ?c WHERE { ?c a og:Consultation }", "raw_data_count": 3, "success": true}
