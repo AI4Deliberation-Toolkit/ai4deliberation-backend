@@ -121,3 +121,81 @@ class ReadPrivacyTests(PrivacyChecks, GatewayTestCase):
         self.assertEqual(response.status_code, 422)
         self.assertTrue(any(r.name == 'django.request' for r in logs.records))
         self.assert_absent((*self.secrets(), QUERY, INM), await self.stored_text(), self.logged_text(logs))
+
+
+QUESTION = 'SENTINEL-QUESTION-2c81'
+HISTORY = 'SENTINEL-HISTORY-6d05'
+ANSWER = 'SENTINEL-ANSWER-a93f'
+SPARQL = 'SENTINEL-SPARQL-17be'
+DETAIL = 'SENTINEL-DETAIL-f5c2'
+
+
+class KgRagPrivacyTests(PrivacyChecks, GatewayTestCase):
+    def setUp(self):
+        super().setUp()
+        self.make_kg_rag_tool(tool_key=TOOL_KEY)
+
+    async def ask_and_capture(self, input, reply):
+        self.tool_reply = reply
+        with self.assertLogs(level='DEBUG') as logs:
+            response = await self.call('kg-rag', 'ask', {'input': input}, quiet_request_log=False,
+                                       headers={'X-User-Context': CONTEXT})
+        return response, logs
+
+    async def assert_nothing_leaked(self, logs):
+        self.assert_absent((*self.secrets(), QUESTION, HISTORY, ANSWER, SPARQL, DETAIL),
+                           await self.stored_text(), self.logged_text(logs))
+
+    @staticmethod
+    def default_input():
+        return {'question': QUESTION, 'history': [[HISTORY, HISTORY]]}
+
+    async def test_success_stores_and_logs_no_content(self):
+        response, logs = await self.ask_and_capture(self.default_input(), reply_json(200, {
+            'answer': ANSWER, 'sparql_generated': SPARQL, 'raw_data_count': 1, 'success': True}))
+        self.assertEqual(response.status_code, 200)
+        sent = self.tool_requests[0].content.decode()  # it really flowed
+        self.assertIn(QUESTION, sent)
+        self.assertIn(HISTORY, sent)
+        self.assertEqual(response.json()['output']['answer'], ANSWER)
+        await self.assert_nothing_leaked(logs)
+
+    async def test_not_answered_stores_and_logs_no_content(self):
+        response, logs = await self.ask_and_capture(self.default_input(), reply_json(200, {
+            'answer': ANSWER, 'sparql_generated': SPARQL, 'success': False}))
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()['error']['tool_body']['answer'], ANSWER)
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        await self.assert_nothing_leaked(logs)
+
+    async def test_unknown_key_value_is_not_logged(self):
+        response, logs = await self.ask_and_capture({'question': QUESTION, 'nickname': HISTORY},
+                                                    reply_json(200, {'answer': ANSWER, 'success': True}))
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(self.tool_requests, [])
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        await self.assert_nothing_leaked(logs)
+
+    async def test_too_long_question_is_not_logged(self):
+        response, logs = await self.ask_and_capture(
+            {'question': QUESTION + 'x' * 4000, 'history': [[HISTORY, HISTORY]]},
+            reply_json(200, {'answer': ANSWER, 'success': True}))
+        self.assertEqual(response.status_code, 422)
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        await self.assert_nothing_leaked(logs)
+
+    async def test_rag_500_detail_is_not_logged(self):
+        response, logs = await self.ask_and_capture(self.default_input(), reply_json(500, {'detail': DETAIL}))
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()['error']['tool_body'], {'detail': DETAIL})
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        await self.assert_nothing_leaked(logs)
+
+    async def test_timeout_stores_and_logs_no_content(self):
+        def reply(request):
+            raise httpx.ReadTimeout('timed out', request=request)
+
+        response, logs = await self.ask_and_capture(self.default_input(), reply)
+        self.assertEqual(response.status_code, 504)
+        self.assertTrue(any(r.name == 'django.request' for r in logs.records))
+        await self.assert_nothing_leaked(logs)

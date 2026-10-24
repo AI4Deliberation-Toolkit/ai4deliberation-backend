@@ -132,17 +132,24 @@ class GatewayTestCase(TestCase):
         return await sync_to_async(self.make_toolkit_tool)(**fields)
 
     async def call(self, tool_id, operation, body=None, *, key=_OWN_KEY, headers=None,
-                   content_type='application/json'):
+                   content_type='application/json', quiet_request_log=True):
+        """A POST on the unified route.
+
+        With quiet_request_log=False, django.request records reach the test's own assertLogs, and their
+        count isn't checked.
+        """
         request_headers = dict(headers or {})
         key = self.key if key is _OWN_KEY else key
         if key is not None:
             request_headers['X-Gateway-Key'] = key
         data = body if isinstance(body, str) else json.dumps({'input': {}} if body is None else body)
-        with capture_logs('django.request') as records:
+        capture = capture_logs('django.request') if quiet_request_log else contextlib.nullcontext()
+        with capture as records:
             response = await self.async_client.post(f'/api/v1/tools/{tool_id}/{operation}', data,
                                                     content_type=content_type, headers=request_headers)
         # Django logs one django.request line per 4xx/5xx: assert it, and keep it out of the suite output.
-        self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
+        if quiet_request_log:
+            self.assertEqual(len(records), int(response.status_code >= 400), [r.getMessage() for r in records])
         return response
 
     async def read(self, tool_id, operation, params=None, *, key=_OWN_KEY, headers=None, quiet_request_log=True):
