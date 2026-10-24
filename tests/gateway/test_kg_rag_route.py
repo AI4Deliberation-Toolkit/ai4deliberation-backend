@@ -92,7 +92,9 @@ class KgRagRouteTests(GatewayTestCase):
         ]
         for body in bodies:
             with self.subTest(body=body):
-                assert_gateway_error(self, await self.call('kg-rag', 'ask', body), 422, 'INVALID_REQUEST')
+                error = assert_gateway_error(self, await self.call('kg-rag', 'ask', body), 422, 'INVALID_REQUEST')
+        # The last body names the surrogate key, which the 422 message echoes (JsonResponse escapes it).
+        self.assertEqual(error['message'], 'Unknown input field(s) for ask: \udfff. Allowed: question, history.')
         self.assertEqual(self.tool_requests, [])
 
     async def test_get_is_405_with_allow_post(self):
