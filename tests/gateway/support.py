@@ -109,6 +109,12 @@ class GatewayTestCase(TestCase):
             'depth': 'adapted', 'adapter': 'topic_toolkit', 'operations': ['extract'], **fields,
         })
 
+    def make_kg_rag_tool(self, **fields) -> Tool:
+        return self.make_tool(**{
+            'tool_id': 'kg-rag', 'name': 'KG chatbot', 'base_url': 'https://kg.example.org',
+            'depth': 'adapted', 'adapter': 'kg_rag', 'operations': ['ask'], 'timeout_seconds': 90, **fields,
+        })
+
     def make_reader_stub_tool(self, **fields) -> Tool:
         return self.make_stub_tool(operations=['echo', 'query'], read_operations=['query'], **fields)
 
@@ -118,6 +124,9 @@ class GatewayTestCase(TestCase):
 
     async def amake_reader_stub_tool(self, **fields) -> Tool:
         return await sync_to_async(self.make_reader_stub_tool)(**fields)
+
+    async def amake_kg_rag_tool(self, **fields) -> Tool:
+        return await sync_to_async(self.make_kg_rag_tool)(**fields)
 
     async def amake_toolkit_tool(self, **fields) -> Tool:
         return await sync_to_async(self.make_toolkit_tool)(**fields)
