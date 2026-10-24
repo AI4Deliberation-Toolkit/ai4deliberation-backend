@@ -186,3 +186,22 @@ class UnknownAdapterCheckTests(TestCase):
         with mock.patch('gateway.models.Tool.objects') as objects:
             objects.exclude.side_effect = DatabaseError('no such table: gateway_tool')
             self.assertEqual(unknown_adapter_check(None, databases=['default']), [])
+
+
+def kg_rag_fields(**overrides):
+    return {'tool_id': 'kg-rag', 'name': 'KG chatbot', 'base_url': 'https://kg.example.org', 'depth': 'adapted',
+            'adapter': 'kg_rag', 'operations': ['ask'], **overrides}
+
+
+class KgRagRegistryTests(TestCase):
+    def test_accepts_ask(self):
+        self.assertEqual(Tool.objects.create(**kg_rag_fields()).read_operation_names(), [])
+
+    def test_refuses_other_operations_and_declared_reads(self):
+        for field, overrides in (('operations', {'operations': ['ask', 'extract']}),
+                                 ('operations', {'operations': ['summarise']}),
+                                 ('read_operations', {'read_operations': ['ask']})):
+            with self.subTest(overrides=overrides):
+                with self.assertRaises(ValidationError) as caught:
+                    Tool.objects.create(**kg_rag_fields(**overrides))
+                self.assertIn(field, caught.exception.message_dict)

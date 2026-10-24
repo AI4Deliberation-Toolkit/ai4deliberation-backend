@@ -28,8 +28,8 @@ class BrokenAdapter(Adapter):
         raise RuntimeError('adapter bug with details')
 
 
-def load_fixture(name):
-    return json.loads((FIXTURES / 'topic_toolkit' / name).read_text(encoding='utf-8'))
+def load_fixture(name, tool='topic_toolkit'):
+    return json.loads((FIXTURES / tool / name).read_text(encoding='utf-8'))
 
 
 def assert_gateway_error(test, response, status, code, source='gateway'):

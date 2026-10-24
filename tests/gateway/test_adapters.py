@@ -3,6 +3,7 @@ from pydantic import ValidationError
 
 from gateway.adapters import ADAPTERS
 from gateway.adapters.base import Outbound, Result, ToolError
+from gateway.adapters.kg_rag import KgRagAdapter
 from gateway.adapters.native import NativeAdapter
 from gateway.adapters.topic_toolkit import TopicToolkitAdapter
 from gateway.errors import GatewayError
@@ -14,7 +15,8 @@ TOOL = None  # adapters don't read the tool in v0
 
 class RegistryTests(SimpleTestCase):
     def test_adapters_are_registered_by_key(self):
-        self.assertEqual(sorted(ADAPTERS), ['native', 'topic_toolkit'])
+        self.assertEqual(sorted(ADAPTERS), ['kg_rag', 'native', 'topic_toolkit'])
+        self.assertIsInstance(ADAPTERS['kg_rag'], KgRagAdapter)
         self.assertIsInstance(ADAPTERS['native'], NativeAdapter)
         self.assertIsInstance(ADAPTERS['topic_toolkit'], TopicToolkitAdapter)
 
@@ -232,3 +234,85 @@ class EnvelopeTests(SimpleTestCase):
     def test_unknown_top_level_keys_are_rejected(self):
         with self.assertRaises(ValidationError):
             Envelope(input={}, inputs={})
+
+
+SECRET = 'SECRET-VALUE-4b7e'
+# Decision 2's messages, copied: the tests pin the exact text, so a case can't pass on the wrong check.
+NOT_A_STRING = 'input.question must be a string.'
+NOT_PAIRS = 'input.history must be a list of [user_message, assistant_reply] pairs.'
+NOT_TEXT = '{} is not valid text (it cannot be encoded as UTF-8).'
+UNKNOWN_WP = 'Unknown input field(s) for ask: wp_user_id. Allowed: question, history.'
+NO_OPTIONS = 'Unknown option(s) for ask: stream. ask takes no options.'
+
+
+class KgRagAdapterTests(SimpleTestCase):
+    adapter = KgRagAdapter()
+
+    def build(self, input, **options):
+        return self.adapter.build_request(TOOL, 'ask', Envelope(input=input, options=options, session_id='s-1'))
+
+    def assert_refused(self, input, message, **options):
+        with self.assertRaises(GatewayError) as caught:
+            self.build(input, **options)
+        self.assertEqual(caught.exception.code, 'INVALID_REQUEST')
+        self.assertEqual(caught.exception.message, message)
+        self.assertNotIn(SECRET, caught.exception.message)
+
+    def test_operations(self):
+        self.assertEqual((self.adapter.operations, self.adapter.read_operations), ({'ask'}, frozenset()))
+
+    def test_build_posts_question_and_history(self):  # Review Focus 5: blank pair kept
+        history = [['Τι είναι;', 'Μια απάντηση.'], ['', '']]
+        self.assertEqual(self.build({'question': '  Ποιο νομοσχέδιο; ', 'history': history}),
+                         Outbound(method='POST', path='/ask', params={},
+                                  json={'question': '  Ποιο νομοσχέδιο; ', 'history': history}))
+
+    def test_history_defaults_to_empty_and_session_id_is_not_sent(self):
+        self.assertEqual(self.build(load_fixture('ask_request.json', 'kg_rag')).json,
+                         {**load_fixture('ask_request.json', 'kg_rag'), 'history': []})
+
+    def test_limits_are_inclusive_and_count_characters(self):  # Review Focus 2
+        outbound = self.build({'question': 'α' * 4000, 'history': [['β' * 8000, 'γ' * 8000]] * 20})
+        self.assertEqual(len(outbound.json['history']), 20)
+        self.assert_refused({'question': 'α' * 4001}, 'input.question is longer than 4000 characters.')
+        self.assert_refused({'question': 'q', 'history': [['β' * 8001, 'b']]},
+                            'input.history[0][0] is longer than 8000 characters.')
+
+    def test_input_refusals_give_the_exact_message_and_no_value(self):
+        q = {'question': 'q'}
+        cases = [
+            ({}, 'input.question is required.'),
+            ({'question': None}, NOT_A_STRING), ({'question': 42}, NOT_A_STRING), ({'question': [SECRET]}, NOT_A_STRING),
+            ({'question': ''}, 'input.question must not be empty.'),
+            ({'question': ' \n\t '}, 'input.question must not be empty.'),
+            ({'question': SECRET + 'x' * 4000}, 'input.question is longer than 4000 characters.'),
+            ({'question': SECRET + '\ud800'}, NOT_TEXT.format('input.question')),
+            ({**q, 'history': None}, NOT_PAIRS), ({**q, 'history': SECRET}, NOT_PAIRS),
+            ({**q, 'history': {'a': SECRET}}, NOT_PAIRS),
+            ({**q, 'history': [['a', 'b']] * 21}, 'input.history has more than 20 pairs.'),
+            ({**q, 'history': [None]}, 'input.history[0] must be a list of two strings.'),
+            ({**q, 'history': [[SECRET]]}, 'input.history[0] must be a list of two strings.'),
+            ({**q, 'history': [[SECRET, 'b', 'c']]}, 'input.history[0] must be a list of two strings.'),
+            ({**q, 'history': [{'user': SECRET, 'assistant': 'b'}]}, 'input.history[0] must be a list of two strings.'),
+            ({**q, 'history': [['a', 'b'], [SECRET, None]]}, 'input.history[1] must be a list of two strings.'),
+            ({**q, 'history': [[SECRET, 7]]}, 'input.history[0] must be a list of two strings.'),
+            ({**q, 'history': [['a', SECRET + 'x' * 8000]]}, 'input.history[0][1] is longer than 8000 characters.'),
+            ({**q, 'history': [[SECRET + '\udfff', 'b']]}, NOT_TEXT.format('input.history[0][0]')),
+            ({**q, 'wp_user_id': SECRET}, UNKNOWN_WP),
+            ({**q, 'username': SECRET}, 'Unknown input field(s) for ask: username. Allowed: question, history.'),
+        ]
+        for input, message in cases:
+            with self.subTest(message=message, input=repr(input)[:60]):
+                self.assert_refused(input, message)
+
+    def test_unknown_input_keys_are_sorted_and_list_the_allowed_ones(self):
+        self.assert_refused({'question': 'q', 'wp_user_id': SECRET, 'username': SECRET},
+                            'Unknown input field(s) for ask: username, wp_user_id. Allowed: question, history.')
+
+    def test_any_option_is_refused(self):
+        self.assert_refused({'question': 'q'}, NO_OPTIONS, stream=True)
+
+    def test_the_first_failing_check_is_reported(self):  # decision 1: options → unknown keys → question → history
+        self.assert_refused({'wp_user_id': SECRET}, NO_OPTIONS, stream=True)
+        self.assert_refused({'wp_user_id': SECRET, 'history': None}, UNKNOWN_WP)
+        self.assert_refused({'question': '', 'history': None}, 'input.question must not be empty.')
