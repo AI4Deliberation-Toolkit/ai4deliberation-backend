@@ -8,5 +8,12 @@ not captured from a live run.
 - `ask_200_not_answered.json`: the HTTP 200 the RAG sends when it could not answer (`success: false`)
 - `ask_500.json`: the RAG's error body when narration fails (`detail` only)
 
-`tests/gateway/test_kg_rag_live.py` checks them against a real RAG service. How to run it: to be filled in
-with that test (it needs `KG_RAG_LIVE_URL` and `KG_RAG_LIVE_KEY`).
+`tests/gateway/test_kg_rag_live.py` checks them against a real RAG service. It needs `KG_RAG_LIVE_URL` and
+`KG_RAG_LIVE_KEY`, set for one command only (never exported), and each run sends one real question (up to
+three LLM calls on the KG side). Read the key without echoing it:
+
+```
+read -rs KG_RAG_LIVE_KEY
+KG_RAG_LIVE_URL=https://… KG_RAG_LIVE_KEY=$KG_RAG_LIVE_KEY python manage.py test tests.gateway.test_kg_rag_live
+unset KG_RAG_LIVE_KEY
+```
