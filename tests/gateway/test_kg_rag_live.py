@@ -21,6 +21,7 @@ from django.test import SimpleTestCase
 
 from gateway.adapters.base import Result, ToolError
 from gateway.adapters.kg_rag import NOT_ANSWERED, KgRagAdapter
+from gateway.errors import GatewayError
 from gateway.schemas import Envelope
 from tests.gateway.support import load_fixture
 
@@ -46,8 +47,11 @@ class LiveKgRagContractTests(SimpleTestCase):
         body = response.json()
         fixture = 'ask_200.json' if body.get('success') is True else 'ask_200_not_answered.json'
         self.assert_same_shape(body, fixture)
-        parsed = adapter.parse_response(None, 'ask', 200, body)
-        if isinstance(parsed, ToolError):
-            self.assertEqual(parsed.message, NOT_ANSWERED)
+        try:
+            parsed = adapter.parse_response(None, 'ask', 200, body)
+        except ToolError as error:  # success: false is raised, not returned
+            self.assertEqual(error.message, NOT_ANSWERED)
+        except GatewayError as error:
+            self.fail(f'the adapter refused the live answer: {error.code}')
         else:
             self.assertIsInstance(parsed, Result)
