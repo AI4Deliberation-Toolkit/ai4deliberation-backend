@@ -91,6 +91,10 @@ separate and unchanged: it still deploys from GitLab with `docker-compose-stagin
    Expect 30–60 s without service.
 4. Over SSH: `backup-status`. A new base backup appears within a minute.
 
+A redeploy cuts requests still running 3 s after shutdown starts (`--graceful-timeout 3`, `app-start.sh`).
+Once the KG chatbot uses the gateway, that cuts any question in progress (the RAG still finishes it):
+release at a quiet time.
+
 ## 4. Replace the pod
 
 Use this when the host has died, or to move to a new pod in the volume's datacenter.
