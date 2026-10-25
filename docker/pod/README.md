@@ -293,6 +293,24 @@ Caching: Cloudflare caches the toolkit's topic list at its edge for 300 s (the t
 `public, max-age=300`), so a taxonomy change can take up to 5 minutes to show, through the gateway as
 in direct mode. The gateway's own answers are `no-store`.
 
+KG chatbot rollout (`kg-rag`, image `d8679aa`, 2026-10-25): Edit Pod from `20216ff` (§3), restore in
+5 s, timeline 7; the one `.history` archive failure from item 4 above. Before it, the two images
+compared: Python 3.12.15, PostgreSQL 17.11 and Debian 12 unchanged; `asgiref` 3.12.1 → 3.13.0,
+`certifi`, `pycparser` and `setuptools` moved too (unpinned dependencies); the test suite passed
+inside the new image (only the tests that read repo files the image leaves out errored). `taxonomy`
+with a throwaway `KT test` key (revoked afterwards): 200. Registry entry: `kg-rag`, adapter `kg_rag`,
+operations `["ask"]`, `base_url` the KG pod's proxy URL, the current RAG key, `timeout_seconds` 90,
+`health_path` `/health`, not `gateway_only`; `check_tools` ok. It stays enabled. Smoke test: an
+unknown input field gave `422 INVALID_REQUEST` in 0.5 s, with no call to the RAG. The first real
+question gave `502 TOOL_AUTH_FAILED` (the RAG's 401, before any LLM work): the tool key had been
+pasted wrong, and was entered again. The next two gave `504 TOOL_TIMEOUT` at 90 s. The KG side's LLM
+worker was cold: its first job ran past RunPod's synchronous wait, and the RAG (KG commit `5d53af0`)
+then gives up with a 500 at about 91 s. A question sent right after queued behind the job the RAG had
+abandoned (`IN_QUEUE`). No 200 through the gateway yet; the direct live check passed in 9 s with a
+warm worker (`tests/fixtures/kg_rag/README.md`). Through the Runpod proxy, a gateway 502 reaches the
+caller as Runpod's own HTML page ("Waiting for service to respond"), not the gateway's JSON error;
+422 and 504 bodies come through unchanged.
+
 Locally, `docker/pod/drill.sh` runs the full drill against a Docker volume (spec §9.2).
 
 ## 8. Reference
